@@ -1,0 +1,9 @@
+[package]
+name = "http11"
+version = "0.1.0"
+authors = ["shivam <shivam.cse17@nituk.ac.in>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
