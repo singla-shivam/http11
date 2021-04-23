@@ -19,12 +19,19 @@ pub enum HttpVersion {
     Http11,
 }
 
+enum PartialRequest {
+    Method(),
+    RequestUri(),
+    HttpVersion(),
+}
+
 pub struct Request<'buf, T> {
     method: HttpMethods,
     uri: RequestUri,
     http_version: HttpVersion,
     body: T,
     phantom: PhantomData<&'buf T>,
+    partial: PartialRequest
 }
 
 impl<'buf, T> Request<'buf, T> {
@@ -54,4 +61,8 @@ fn skip_initial_crlf(bytes: &mut Bytes) {
             None => return (),
         }
     }
+}
+
+fn parse_token() {
+
 }
