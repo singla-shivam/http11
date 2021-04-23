@@ -1,3 +1,4 @@
+pub mod headers;
 mod http11;
 pub mod request;
 pub mod request_uri;

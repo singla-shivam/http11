@@ -3,8 +3,5 @@ use http11::Http11;
 
 fn main() {
     println!("abc");
-    // Http11::start();
-    let x = StatusCode::CONTINUE;
-    println!("{:?}", x);
-    println!("{:?}", StatusCode::reason(500));
+    Http11::start();
 }
