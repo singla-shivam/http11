@@ -1,23 +1,43 @@
-use std::io::prelude::*;
-use std::net::{TcpListener, TcpStream};
+use crate::Request;
+use std::io::{ErrorKind, Result};
+use tokio::net::{TcpListener, TcpStream};
 
 pub struct Http11 {}
 
 impl Http11 {
-    pub fn start() {
-        let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    pub async fn start() -> Result<()> {
+        println!("here1");
+        let listener = TcpListener::bind("127.0.0.1:8080").await?;
 
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            Http11::handle_connection(stream);
+        loop {
+            println!("here2");
+            let (socket, _) = listener.accept().await?;
+            Http11::process_socket(socket).await?;
         }
     }
 
-    fn handle_connection(mut stream: TcpStream) {
+    async fn process_socket(stream: TcpStream) -> Result<()> {
         let mut buffer = [0; 1024];
 
-        stream.read(&mut buffer).unwrap();
+        loop {
+            stream.readable().await?;
+            match stream.try_read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    // msg.truncate(n);
+                    break;
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
 
-        println!("{}", String::from_utf8_lossy(&buffer[..]));
+        let _r = Request::<String>::parse(&buffer);
+
+        Ok(())
     }
 }
