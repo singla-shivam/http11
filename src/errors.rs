@@ -43,4 +43,5 @@ errors! {
     (NewLine, "Invalid byte in new line");
     (Token, "Invalid token character");
     (InvalidUri, "Invalid token in Uri");
+    (InvalidHttpVersion, "Invalid http version");
 }

@@ -1,7 +1,7 @@
 use crate::errors::Error;
 use crate::grammar::is_token_char;
 use crate::helpers::bytes::Bytes;
-use crate::request_uri::RequestUri;
+use crate::request::request_uri::RequestUri;
 use std::marker::PhantomData;
 use std::vec::Vec;
 
@@ -42,8 +42,19 @@ pub enum HttpVersion {
     Http11,
 }
 
+impl HttpVersion {
+    pub fn from_vector(v: Vec<u8>) -> Result<HttpVersion, Error> {
+        let version = String::from_utf8(v).unwrap().to_lowercase();
+
+        match &version[..] {
+            "http/1.1" => Ok(HttpVersion::Http11),
+            _ => Err(Error::InvalidHttpVersion),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug)]
-enum PartialRequest {
+pub(crate) enum PartialRequest {
     Method(Vec<u8>),
     RequestUri(Vec<u8>),
     HttpVersion(Vec<u8>),
@@ -56,15 +67,6 @@ pub struct RequestBuilder<'buf, T> {
     method: Option<HttpMethods>,
     uri: Option<RequestUri>,
     http_version: Option<HttpVersion>,
-    // body: T,
-    phantom: PhantomData<&'buf T>,
-    partial: PartialRequest,
-}
-
-pub struct Request<'buf, T> {
-    method: HttpMethods,
-    uri: RequestUri,
-    http_version: HttpVersion,
     // body: T,
     phantom: PhantomData<&'buf T>,
     partial: PartialRequest,
@@ -310,10 +312,7 @@ fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
 
 #[cfg(test)]
 mod request_tests {
-    #[macro_use]
     use super::{HttpMethods, RequestBuilder};
-    #[macro_use]
-    use crate::helpers::macros;
 
     #[test]
     fn test_remove_initial_empty_lines() {
