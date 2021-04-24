@@ -135,7 +135,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         };
 
         let buffer = buffer.to_vec();
-        let uri = RequestUri::from_vector(buffer);
+        let uri = RequestUri::from_vector(buffer).expect("invalid uri");
         self.uri = Some(uri);
 
         if is_partial_used {
@@ -150,7 +150,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn parse_method(&mut self, bytes: &mut Bytes) -> &RequestBuilder<'buf, T> {
+    fn parse_method(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
         if self.method.is_some() {
             return self;
         }
@@ -173,17 +173,28 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn parse_request_uri(&mut self, bytes: &mut Bytes) -> &RequestBuilder<'buf, T> {
-        let method = parse_token(bytes).unwrap();
+    fn parse_request_uri(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+        if self.uri.is_some() {
+            return self;
+        }
 
-        match method {
-            PartialRequest::Token(ref v) => {
+        if let PartialRequest::RequestUri(_) = self.partial {
+        } else if let PartialRequest::Uninit = self.partial {
+        } else {
+            return self;
+        }
+
+        let request_uri = parse_request_uri(bytes).unwrap();
+
+        match request_uri {
+            PartialRequest::RequestUri(ref v) => {
+                // TODO (singla-shivam) improve this new copy
                 let v = v.to_vec();
                 self.add_partial(PartialRequest::RequestUri(v));
             }
 
             PartialRequest::Complete(v) => {
-                self.add_method(v);
+                self.add_request_uri(v);
             }
 
             _ => (),
@@ -197,7 +208,10 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         let mut bytes = Bytes::new(buf);
         skip_initial_crlf(&mut bytes);
 
-        request_builder.parse_method(&mut bytes);
+        request_builder
+            .parse_method(&mut bytes)
+            .parse_request_uri(&mut bytes);
+
         request_builder
     }
 
@@ -213,10 +227,14 @@ impl<'buf, T> RequestBuilder<'buf, T> {
                 self.parse_method(&mut bytes);
             }
 
+            PartialRequest::RequestUri(_) => {
+                self.parse_request_uri(&mut bytes);
+            }
+
             _ => (),
         }
 
-        self.parse_method(&mut bytes);
+        self.parse_method(&mut bytes).parse_request_uri(&mut bytes);
 
         self
     }
@@ -265,11 +283,38 @@ fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
     }
 }
 
-// fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {}
+fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+    // TODO (singla-shivam) remove duplicate code with parse_token
+    let start = bytes.current_pos();
+    loop {
+        let byte = bytes.next();
+
+        if byte == Some(b' ') || byte == None {
+            let end = bytes.current_pos() - 1;
+
+            if byte == None {
+                let vec = bytes.copy_buffer(start, end);
+                return Ok(PartialRequest::RequestUri(vec));
+            }
+
+            let vec = bytes.copy_buffer(start, end - 1); // remove space
+
+            return Ok(PartialRequest::Complete(vec));
+        }
+        // TODO (singla-shivam) handle invalid character case
+        // else if !is_token_char(byte.unwrap()) {
+        //     return Err(Error::Token);
+        // }
+    }
+}
 
 #[cfg(test)]
 mod request_tests {
+    #[macro_use]
     use super::{HttpMethods, RequestBuilder};
+    #[macro_use]
+    use crate::helpers::macros;
+
     #[test]
     fn test_remove_initial_empty_lines() {
         let buffer = b"\r\n\r\n\n\nGET HTTP/1.1";
@@ -284,17 +329,54 @@ mod request_tests {
         assert!(builder.method.is_none());
         assert!(builder.partial.has_partial());
 
-        let buffer = b"T HTTP/1.1";
+        let buffer = b"T /abc";
         builder.parse_more(buffer);
+
         assert!(builder.method.is_some());
-        if let Some(HttpMethods::GET) = builder.method {
-        } else {
-            panic!(
-                "expected method {:?}; found {:?}",
-                HttpMethods::GET,
-                builder.method
-            );
-        }
+        assert_match!(
+            builder.method,
+            Some(HttpMethods::GET),
+            "expected method {:?}; found {:?}",
+            HttpMethods::GET,
+            builder.method
+        );
+    }
+
+    #[test]
+    fn test_parse_uri() {
+        let buffer = b"\r\n\r\n\n\nGET /abc ";
+        let builder = RequestBuilder::<String>::parse(buffer);
+
         assert!(builder.method.is_some());
+        assert!(builder.uri.is_some());
+        assert_match!(builder.uri, Some(..));
+
+        assert_eq!(builder.uri.unwrap().uri(), &String::from("/abc"));
+    }
+
+    #[test]
+    fn test_partial_parse_uri() {
+        let buffer = b"GE";
+        let mut builder = RequestBuilder::<String>::parse(buffer);
+        assert!(builder.method.is_none());
+        assert!(builder.uri.is_none());
+        assert!(builder.partial.has_partial());
+
+        let buffer = b"T /ab";
+        builder.parse_more(buffer);
+
+        assert!(builder.method.is_some());
+        assert!(builder.uri.is_none());
+        assert!(builder.partial.has_partial());
+        assert_match!(builder.method, Some(HttpMethods::GET));
+
+        let buffer = b"cd ";
+        builder.parse_more(buffer);
+
+        assert!(builder.method.is_some());
+        assert!(builder.uri.is_some());
+        assert_match!(builder.uri, Some(..));
+
+        assert_eq!(builder.uri.unwrap().uri(), &String::from("/abcd"));
     }
 }

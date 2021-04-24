@@ -9,6 +9,7 @@ extern crate lazy_static;
 pub mod errors;
 mod grammar;
 pub mod headers;
+#[macro_use]
 mod helpers;
 mod http11;
 mod request;
@@ -18,3 +19,4 @@ pub mod status;
 
 pub use crate::http11::*;
 pub use request::{Request, RequestBuilder};
+

@@ -42,4 +42,5 @@ macro_rules! errors {
 errors! {
     (NewLine, "Invalid byte in new line");
     (Token, "Invalid token character");
+    (InvalidUri, "Invalid token in Uri");
 }
