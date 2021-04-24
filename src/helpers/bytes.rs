@@ -1,3 +1,6 @@
+use std::boxed::Box;
+use std::ptr;
+
 pub(crate) struct Bytes<'a> {
     buf: &'a [u8],
     pos: usize,
@@ -12,12 +15,18 @@ impl<'a> Bytes<'a> {
         self.buf.len()
     }
 
+    pub fn current_pos(&self) -> usize {
+        self.pos
+    }
+
     pub fn peek(&self) -> Option<u8> {
         self.buf.get(self.pos).cloned()
     }
 
-    pub fn next(&mut self) -> &Bytes {
-        self.advance(1)
+    pub fn bump(&mut self) -> Option<u8> {
+        let byte = self.peek();
+        self.advance(1);
+        byte
     }
 
     pub fn buffer(&self) -> &'a [u8] {
@@ -28,6 +37,19 @@ impl<'a> Bytes<'a> {
         assert!(self.pos + count <= self.len(), "bytes advance overflow");
         self.pos += count;
         self
+    }
+
+    pub fn copy_buffer(&mut self, start: usize, end: usize) -> Vec<u8> {
+        let size = end - start + 1;
+        let mut dest = vec![0; size];
+
+        let pointer = self.buf.as_ptr();
+
+        unsafe {
+            ptr::copy(pointer, dest.as_mut_ptr(), size);
+        }
+
+        dest
     }
 }
 

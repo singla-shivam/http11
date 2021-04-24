@@ -1,8 +1,13 @@
+#![cfg_attr(
+    debug_assertions,
+    allow(dead_code, unused_imports, unused_must_use, unused_variables)
+)]
+
 #[macro_use]
 extern crate lazy_static;
 
 pub mod errors;
-mod grammer;
+mod grammar;
 pub mod headers;
 mod helpers;
 mod http11;
@@ -12,4 +17,4 @@ pub mod response;
 pub mod status;
 
 pub use crate::http11::*;
-pub use request::*;
+pub use request::{Request, RequestBuilder};

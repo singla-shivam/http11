@@ -21,7 +21,6 @@ macro_rules! errors {
                     $(
                         Error::$name => $phrase,
                     )+
-                    _ => ""
                 }
             }
         }
@@ -42,4 +41,5 @@ macro_rules! errors {
 
 errors! {
     (NewLine, "Invalid byte in new line");
+    (Token, "Invalid token character");
 }

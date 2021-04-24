@@ -1,5 +1,6 @@
-use crate::Request;
+use crate::RequestBuilder;
 use std::io::{ErrorKind, Result};
+use std::mem::MaybeUninit;
 use tokio::net::{TcpListener, TcpStream};
 
 pub struct Http11 {}
@@ -17,7 +18,7 @@ impl Http11 {
     }
 
     async fn process_socket(stream: TcpStream) -> Result<()> {
-        let mut buffer = [0; 1024];
+        let mut buffer: [u8; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
 
         loop {
             stream.readable().await?;
@@ -36,7 +37,7 @@ impl Http11 {
             }
         }
 
-        let _r = Request::<String>::parse(&buffer);
+        let _r = RequestBuilder::<String>::parse(&buffer);
 
         Ok(())
     }

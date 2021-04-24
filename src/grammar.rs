@@ -58,12 +58,18 @@ lazy_static! {
     };
 }
 
+#[inline]
+pub fn is_token_char(byte: u8) -> bool {
+    TOKEN_CHAR[byte as usize]
+}
+
 pub fn is_token(bytes: &[u8]) -> bool {
     for byte in bytes {
-        if !TOKEN_CHAR[*byte as usize] {
+        if !is_token_char(*byte) {
             return false;
         }
     }
+
     true
 }
 
