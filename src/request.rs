@@ -5,6 +5,7 @@ use crate::request_uri::RequestUri;
 use std::marker::PhantomData;
 use std::vec::Vec;
 
+#[derive(Debug)]
 pub enum HttpMethods {
     GET,
     OPTIONS,
@@ -41,7 +42,7 @@ pub enum HttpVersion {
     Http11,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum PartialRequest {
     Method(Vec<u8>),
     RequestUri(Vec<u8>),
@@ -150,6 +151,10 @@ impl<'buf, T> RequestBuilder<'buf, T> {
     }
 
     fn parse_method(&mut self, bytes: &mut Bytes) -> &RequestBuilder<'buf, T> {
+        if self.method.is_some() {
+            return self;
+        }
+
         let method = parse_token(bytes).unwrap();
 
         match method {
@@ -201,6 +206,18 @@ impl<'buf, T> RequestBuilder<'buf, T> {
             return self;
         }
 
+        let mut bytes = Bytes::new(buf);
+
+        match &self.partial {
+            PartialRequest::Method(_) => {
+                self.parse_method(&mut bytes);
+            }
+
+            _ => (),
+        }
+
+        self.parse_method(&mut bytes);
+
         self
     }
 }
@@ -211,9 +228,9 @@ fn skip_initial_crlf(bytes: &mut Bytes) {
 
         match byte {
             Some(b'\r') => {
-                let next_byte = bytes.peek().unwrap();
-                assert!(next_byte == b'\n', Error::NewLine);
                 bytes.bump();
+                let next_byte = bytes.bump().unwrap();
+                assert!(next_byte == b'\n', "expected \\n but found {}", next_byte);
             }
             Some(b'\n') => {
                 bytes.bump();
@@ -233,11 +250,13 @@ fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
 
         if byte == Some(b' ') || byte == None {
             let end = bytes.current_pos() - 1;
-            let vec = bytes.copy_buffer(start, end);
 
             if byte == None {
+                let vec = bytes.copy_buffer(start, end);
                 return Ok(PartialRequest::Token(vec));
             }
+
+            let vec = bytes.copy_buffer(start, end - 1); // remove space
 
             return Ok(PartialRequest::Complete(vec));
         } else if !is_token_char(byte.unwrap()) {
@@ -248,5 +267,34 @@ fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
 
 // fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {}
 
-#[cfg(tests)]
-mod tests {}
+#[cfg(test)]
+mod request_tests {
+    use super::{HttpMethods, RequestBuilder};
+    #[test]
+    fn test_remove_initial_empty_lines() {
+        let buffer = b"\r\n\r\n\n\nGET HTTP/1.1";
+        let builder = RequestBuilder::<String>::parse(buffer);
+        assert!(builder.method.is_some());
+    }
+
+    #[test]
+    fn test_use_parse_more() {
+        let buffer = b"GE";
+        let mut builder = RequestBuilder::<String>::parse(buffer);
+        assert!(builder.method.is_none());
+        assert!(builder.partial.has_partial());
+
+        let buffer = b"T HTTP/1.1";
+        builder.parse_more(buffer);
+        assert!(builder.method.is_some());
+        if let Some(HttpMethods::GET) = builder.method {
+        } else {
+            panic!(
+                "expected method {:?}; found {:?}",
+                HttpMethods::GET,
+                builder.method
+            );
+        }
+        assert!(builder.method.is_some());
+    }
+}

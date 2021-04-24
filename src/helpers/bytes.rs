@@ -46,7 +46,7 @@ impl<'a> Bytes<'a> {
         let pointer = self.buf.as_ptr();
 
         unsafe {
-            ptr::copy(pointer, dest.as_mut_ptr(), size);
+            ptr::copy(pointer.offset(start as isize), dest.as_mut_ptr(), size);
         }
 
         dest
