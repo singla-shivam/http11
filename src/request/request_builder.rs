@@ -1,7 +1,7 @@
 use crate::errors::Error;
 use crate::grammar::is_token_char;
 use crate::helpers::bytes::Bytes;
-use crate::request::request_uri::RequestUri;
+use crate::request::RequestUri;
 use std::marker::PhantomData;
 use std::vec::Vec;
 
@@ -38,6 +38,7 @@ impl HttpMethods {
     }
 }
 
+#[derive(Debug)]
 pub enum HttpVersion {
     Http11,
 }
@@ -45,6 +46,7 @@ pub enum HttpVersion {
 impl HttpVersion {
     pub fn from_vector(v: Vec<u8>) -> Result<HttpVersion, Error> {
         let version = String::from_utf8(v).unwrap().to_lowercase();
+        println!("{}", version);
 
         match &version[..] {
             "http/1.1" => Ok(HttpVersion::Http11),
@@ -147,6 +149,28 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
+    // TODO (singla-shivam) remove repetitive code
+    fn add_http_version(&mut self, v: Vec<u8>) -> &RequestBuilder<'buf, T> {
+        let mut is_partial_used = false;
+        let buffer = if let PartialRequest::HttpVersion(ref mut v1) = self.partial {
+            v1.extend_from_slice(&*v);
+            is_partial_used = true;
+            v1
+        } else {
+            &*v
+        };
+
+        let buffer = buffer.to_vec();
+        let version = HttpVersion::from_vector(buffer).expect("invalid http version");
+        self.http_version = Some(version);
+
+        if is_partial_used {
+            self.partial = PartialRequest::Uninit;
+        }
+
+        self
+    }
+
     fn add_partial(&mut self, new_partial: PartialRequest) -> &RequestBuilder<'buf, T> {
         self.partial = new_partial;
         self
@@ -205,6 +229,36 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
+    fn parse_http_version(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+        if self.http_version.is_some() {
+            return self;
+        }
+
+        if let PartialRequest::HttpVersion(_) = self.partial {
+        } else if let PartialRequest::Uninit = self.partial {
+        } else {
+            return self;
+        }
+
+        let http_version = parse_http_version(bytes).expect("Invalid http version");
+
+        match http_version {
+            PartialRequest::HttpVersion(ref v) => {
+                // TODO (singla-shivam) improve this new copy
+                let v = v.to_vec();
+                self.add_partial(PartialRequest::HttpVersion(v));
+            }
+
+            PartialRequest::Complete(v) => {
+                self.add_http_version(v);
+            }
+
+            _ => (),
+        }
+
+        self
+    }
+
     pub(crate) fn parse(buf: &'buf [u8]) -> RequestBuilder<'buf, T> {
         let mut request_builder = RequestBuilder::new();
         let mut bytes = Bytes::new(buf);
@@ -212,7 +266,8 @@ impl<'buf, T> RequestBuilder<'buf, T> {
 
         request_builder
             .parse_method(&mut bytes)
-            .parse_request_uri(&mut bytes);
+            .parse_request_uri(&mut bytes)
+            .parse_http_version(&mut bytes);
 
         request_builder
     }
@@ -233,10 +288,16 @@ impl<'buf, T> RequestBuilder<'buf, T> {
                 self.parse_request_uri(&mut bytes);
             }
 
+            PartialRequest::HttpVersion(_) => {
+                self.parse_http_version(&mut bytes);
+            }
+
             _ => (),
         }
 
-        self.parse_method(&mut bytes).parse_request_uri(&mut bytes);
+        self.parse_method(&mut bytes)
+            .parse_request_uri(&mut bytes)
+            .parse_http_version(&mut bytes);
 
         self
     }
@@ -263,7 +324,21 @@ fn skip_initial_crlf(bytes: &mut Bytes) {
     }
 }
 
-fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+fn get_token_buffer<F1, F2, F3>(
+    bytes: &mut Bytes,
+    on_empty: F1,
+    on_found: F2,
+    verify_character: F3,
+) -> Result<PartialRequest, Error>
+where
+    F1: FnOnce() -> PartialRequest,
+    F2: FnOnce(Vec<u8>) -> PartialRequest,
+    F3: FnOnce(u8) -> Result<(), Error>,
+{
+    if bytes.is_empty() {
+        return Ok(on_empty());
+    }
+
     let start = bytes.current_pos();
     loop {
         let byte = bytes.next();
@@ -273,46 +348,51 @@ fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
 
             if byte == None {
                 let vec = bytes.copy_buffer(start, end);
-                return Ok(PartialRequest::Token(vec));
+                return Ok(on_found(vec));
             }
 
             let vec = bytes.copy_buffer(start, end - 1); // remove space
 
             return Ok(PartialRequest::Complete(vec));
-        } else if !is_token_char(byte.unwrap()) {
-            return Err(Error::Token);
         }
     }
 }
 
-fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
-    // TODO (singla-shivam) remove duplicate code with parse_token
-    let start = bytes.current_pos();
-    loop {
-        let byte = bytes.next();
+fn parse_token(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+    let on_empty = || PartialRequest::Token(vec![]);
+    let on_found = |vec: Vec<u8>| PartialRequest::Token(vec);
 
-        if byte == Some(b' ') || byte == None {
-            let end = bytes.current_pos() - 1;
-
-            if byte == None {
-                let vec = bytes.copy_buffer(start, end);
-                return Ok(PartialRequest::RequestUri(vec));
-            }
-
-            let vec = bytes.copy_buffer(start, end - 1); // remove space
-
-            return Ok(PartialRequest::Complete(vec));
+    let verify_character = |byte: u8| {
+        if !is_token_char(byte) {
+            println!("not token byte {}", byte);
+            return Err(Error::Token);
         }
-        // TODO (singla-shivam) handle invalid character case
-        // else if !is_token_char(byte.unwrap()) {
-        //     return Err(Error::Token);
-        // }
-    }
+
+        Ok(())
+    };
+
+    get_token_buffer(bytes, on_empty, on_found, verify_character)
+}
+
+fn parse_http_version(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+    let on_empty = || PartialRequest::HttpVersion(vec![]);
+    let on_found = |vec: Vec<u8>| PartialRequest::HttpVersion(vec);
+    let verify_character = |_: u8| Ok(());
+
+    get_token_buffer(bytes, on_empty, on_found, verify_character)
+}
+
+fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+    let on_empty = || PartialRequest::RequestUri(vec![]);
+    let on_found = |vec: Vec<u8>| PartialRequest::RequestUri(vec);
+    let verify_character = |_: u8| Ok(());
+
+    get_token_buffer(bytes, on_empty, on_found, verify_character)
 }
 
 #[cfg(test)]
 mod request_tests {
-    use super::{HttpMethods, RequestBuilder};
+    use super::{HttpMethods, HttpVersion, PartialRequest, RequestBuilder};
 
     #[test]
     fn test_remove_initial_empty_lines() {
@@ -328,7 +408,7 @@ mod request_tests {
         assert!(builder.method.is_none());
         assert!(builder.partial.has_partial());
 
-        let buffer = b"T /abc";
+        let buffer = b"T ";
         builder.parse_more(buffer);
 
         assert!(builder.method.is_some());
@@ -339,6 +419,9 @@ mod request_tests {
             HttpMethods::GET,
             builder.method
         );
+
+        let empty: Vec<u8> = vec![];
+        assert_match!(builder.partial, PartialRequest::RequestUri(empty));
     }
 
     #[test]
@@ -354,28 +437,84 @@ mod request_tests {
     }
 
     #[test]
-    fn test_partial_parse_uri() {
-        let buffer = b"GE";
-        let mut builder = RequestBuilder::<String>::parse(buffer);
-        assert!(builder.method.is_none());
-        assert!(builder.uri.is_none());
-        assert!(builder.partial.has_partial());
-
-        let buffer = b"T /ab";
-        builder.parse_more(buffer);
-
-        assert!(builder.method.is_some());
-        assert!(builder.uri.is_none());
-        assert!(builder.partial.has_partial());
-        assert_match!(builder.method, Some(HttpMethods::GET));
-
-        let buffer = b"cd ";
-        builder.parse_more(buffer);
+    fn test_one_pass_parse() {
+        let buffer = b"\r\n\r\n\n\nGET /abc HTTP/1.1 ";
+        let builder = RequestBuilder::<String>::parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
-        assert_match!(builder.uri, Some(..));
+        assert!(builder.http_version.is_some());
 
-        assert_eq!(builder.uri.unwrap().uri(), &String::from("/abcd"));
+        assert_match!(
+            builder.method,
+            Some(HttpMethods::GET),
+            "expected method {:?}; found {:?}",
+            HttpMethods::GET,
+            builder.method
+        );
+
+        assert_eq!(builder.uri.unwrap().uri(), &String::from("/abc"));
+        assert_match!(
+            builder.http_version,
+            Some(HttpVersion::Http11),
+            "expected version {:?}; found {:?}",
+            HttpVersion::Http11,
+            builder.http_version
+        );
     }
+
+    // #[test]
+    // fn test_parse_more() {
+    //     let buffer = b"GE";
+    //     let mut builder = RequestBuilder::<String>::parse(buffer);
+
+    //     assert!(builder.method.is_none());
+    //     assert!(builder.uri.is_none());
+    //     assert!(builder.http_version.is_none());
+    //     assert!(builder.partial.has_partial());
+
+    //     let buffer = b"T /ab";
+    //     builder.parse_more(buffer);
+
+    //     assert!(builder.method.is_some());
+    //     assert!(builder.uri.is_none());
+    //     assert!(builder.http_version.is_none());
+    //     assert!(builder.partial.has_partial());
+
+    //     assert_match!(builder.method, Some(HttpMethods::GET));
+    //     assert_match!(builder.partial, PartialRequest::RequestUri(_));
+
+    //     let buffer = b"cd ";
+    //     let empty: Vec<u8> = vec![];
+    //     builder.parse_more(buffer);
+
+    //     assert!(builder.method.is_some());
+    //     assert!(builder.uri.is_some());
+    //     assert!(builder.http_version.is_none());
+    //     assert!(builder.partial.has_partial());
+
+    //     // assert_eq!(&builder.uri.unwrap().uri().clone()[..], "/abcd");
+    //     // assert_match!(builder.partial, PartialRequest::HttpVersion(empty));
+
+    //     let buffer = b"HTTP";
+    //     builder.parse_more(buffer);
+
+    //     assert!(builder.method.is_some());
+    //     assert!(builder.uri.is_some());
+    //     assert!(builder.http_version.is_none());
+    //     assert!(builder.partial.has_partial());
+
+    //     assert_match!(builder.partial, PartialRequest::HttpVersion(_));
+
+    //     let buffer = b"/1.1 ";
+    //     builder.parse_more(buffer);
+
+    //     assert!(builder.method.is_some());
+    //     assert!(builder.uri.is_some());
+    //     assert!(builder.http_version.is_some());
+    //     assert!(builder.partial.has_partial());
+
+    //     assert_match!(builder.http_version, Some(HttpVersion::Http11));
+    //     assert_match!(builder.partial, PartialRequest::Uninit);
+    // }
 }

@@ -15,6 +15,10 @@ impl<'a> Bytes<'a> {
         self.buf.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.pos >= self.len()
+    }
+
     pub fn current_pos(&self) -> usize {
         self.pos
     }

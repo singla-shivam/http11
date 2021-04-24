@@ -1,5 +1,4 @@
-use crate::request::request_builder::{HttpMethods, HttpVersion, PartialRequest};
-use crate::request::RequestUri;
+use crate::request::{HttpMethods, HttpVersion, PartialRequest, RequestUri};
 use std::marker::PhantomData;
 
 pub struct Request<'buf, T> {
