@@ -1,3 +1,5 @@
+use crate::errors::Error;
+
 pub trait Header<'a> {
     const NAME: &'a str;
     fn get_value() -> String;
@@ -11,3 +13,11 @@ pub trait ResponseHeader<'a>: Header<'a> {}
 
 mod accept;
 pub use accept::*;
+
+pub(crate) struct Headers {}
+
+impl Headers {
+    pub fn from_vector(v: Vec<u8>) -> Result<Headers, Error> {
+        Ok(Headers {})
+    }
+}

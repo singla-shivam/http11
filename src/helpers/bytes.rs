@@ -24,7 +24,16 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn peek(&self) -> Option<u8> {
-        self.buf.get(self.pos).cloned()
+        self.at(0)
+    }
+
+    pub fn at(&self, index: isize) -> Option<u8> {
+        if index < 0 {
+            let len = self.len() as isize;
+            self.buf.get((len + index) as usize).cloned()
+        } else {
+            self.buf.get(self.pos + index as usize).cloned()
+        }
     }
 
     pub fn bump(&mut self) -> Option<u8> {
@@ -37,7 +46,12 @@ impl<'a> Bytes<'a> {
         self.buf
     }
 
-    pub fn advance(&mut self, count: usize) -> &Bytes {
+    pub fn advance(&mut self, count: isize) -> &Bytes {
+        if count < 0 {
+            return self;
+        }
+
+        let count = count as usize;
         assert!(self.pos + count <= self.len(), "bytes advance overflow");
         self.pos += count;
         self
