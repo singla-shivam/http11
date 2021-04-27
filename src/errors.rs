@@ -1,4 +1,11 @@
-use std::fmt;
+use std::convert::From;
+use std::{fmt, io};
+
+impl From<Error> for io::Error {
+    fn from(f: Error) -> Self {
+        io::Error::new(io::ErrorKind::InvalidData, f)
+    }
+}
 
 macro_rules! errors {
     (
@@ -44,4 +51,5 @@ errors! {
     (Token, "Invalid token character");
     (InvalidUri, "Invalid token in Uri");
     (InvalidHttpVersion, "Invalid http version");
+    (RequestNotParsed, "Trying to get request before it is not parsed completely");
 }

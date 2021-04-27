@@ -2,8 +2,7 @@ use crate::errors::Error;
 use crate::grammar::is_token_char;
 use crate::headers::Headers;
 use crate::helpers::bytes::Bytes;
-use crate::request::RequestUri;
-use std::marker::PhantomData;
+use crate::request::{Request, RequestUri};
 use std::mem;
 use std::vec::Vec;
 
@@ -66,13 +65,12 @@ pub(crate) enum PartialRequest {
     Uninit,
 }
 
-pub struct RequestBuilder<'buf, T> {
+pub struct RequestBuilder {
     method: Option<HttpMethods>,
     uri: Option<RequestUri>,
     http_version: Option<HttpVersion>,
     headers: Option<Headers>,
-    // body: T,
-    phantom: PhantomData<&'buf T>,
+    body: Option<Vec<u8>>,
     partial: PartialRequest,
 }
 
@@ -161,14 +159,14 @@ impl Default for PartialRequest {
     }
 }
 
-impl<'buf, T> RequestBuilder<'buf, T> {
-    fn new() -> RequestBuilder<'buf, T> {
+impl RequestBuilder {
+    pub fn new() -> RequestBuilder {
         RequestBuilder {
             method: None,
             uri: None,
             http_version: None,
             headers: None,
-            phantom: PhantomData,
+            body: Some(vec![]),
             partial: PartialRequest::Uninit,
         }
     }
@@ -181,7 +179,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
             && !self.partial.has_partial()
     }
 
-    fn add_method(&mut self, v: Vec<u8>) -> &RequestBuilder<'buf, T> {
+    fn add_method(&mut self, v: Vec<u8>) -> &RequestBuilder {
         self.partial = self.partial.append(PartialRequest::Method(v));
 
         let buffer = self.partial.take_vec();
@@ -191,7 +189,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn add_request_uri(&mut self, v: Vec<u8>) -> &RequestBuilder<'buf, T> {
+    fn add_request_uri(&mut self, v: Vec<u8>) -> &RequestBuilder {
         self.partial = self.partial.append(PartialRequest::RequestUri(v));
 
         let buffer = self.partial.take_vec();
@@ -201,7 +199,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn add_http_version(&mut self, v: Vec<u8>) -> &RequestBuilder<'buf, T> {
+    fn add_http_version(&mut self, v: Vec<u8>) -> &RequestBuilder {
         self.partial = self.partial.append(PartialRequest::HttpVersion(v));
 
         let buffer = self.partial.take_vec();
@@ -211,7 +209,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn add_headers(&mut self, v: Vec<u8>) -> &RequestBuilder<'buf, T> {
+    fn add_headers(&mut self, v: Vec<u8>) -> &RequestBuilder {
         self.partial = self.partial.append(PartialRequest::Headers(v));
 
         let buffer = self.partial.take_vec();
@@ -221,12 +219,12 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn add_partial(&mut self, new_partial: PartialRequest) -> &RequestBuilder<'buf, T> {
+    fn add_partial(&mut self, new_partial: PartialRequest) -> &RequestBuilder {
         self.partial = self.partial.append(new_partial);
         self
     }
 
-    fn parse_method(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+    fn parse_method(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder {
         if self.method.is_some() {
             return self;
         }
@@ -248,7 +246,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn parse_request_uri(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+    fn parse_request_uri(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder {
         if self.uri.is_some() {
             return self;
         }
@@ -276,7 +274,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn parse_http_version(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+    fn parse_http_version(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder {
         if self.http_version.is_some() {
             return self;
         }
@@ -304,7 +302,7 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    fn parse_headers(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder<'buf, T> {
+    fn parse_headers(&mut self, bytes: &mut Bytes) -> &mut RequestBuilder {
         if self.headers.is_some() {
             return self;
         }
@@ -338,49 +336,53 @@ impl<'buf, T> RequestBuilder<'buf, T> {
         self
     }
 
-    pub(crate) fn parse(buf: &'buf [u8]) -> RequestBuilder<'buf, T> {
-        let mut request_builder = RequestBuilder::new();
-        let mut bytes = Bytes::new(buf);
-        skip_initial_crlf(&mut bytes);
-
-        request_builder
-            .parse_method(&mut bytes)
-            .parse_request_uri(&mut bytes)
-            .parse_http_version(&mut bytes)
-            .parse_headers(&mut bytes);
-
-        request_builder
+    pub(crate) fn save_body_buffer(&mut self, buf: &[u8]) -> &mut RequestBuilder {
+        let body = self.body.as_mut().unwrap();
+        body.extend_from_slice(buf);
+        self
     }
 
-    pub(crate) fn parse_more(&mut self, buf: &'buf [u8]) -> &RequestBuilder<'buf, T> {
-        if self.is_parsed() && !self.partial.has_partial() {
-            return self;
-        }
-
+    pub(crate) fn parse(&mut self, buf: &[u8]) -> &RequestBuilder {
         let mut bytes = Bytes::new(buf);
 
-        match &self.partial {
-            PartialRequest::Method(_) => {
-                self.parse_method(&mut bytes);
-            }
-
-            PartialRequest::RequestUri(_) => {
-                self.parse_request_uri(&mut bytes);
-            }
-
-            PartialRequest::HttpVersion(_) => {
-                self.parse_http_version(&mut bytes);
-            }
-
-            _ => (),
+        if self.method.is_none() {
+            skip_initial_crlf(&mut bytes);
         }
 
         self.parse_method(&mut bytes)
             .parse_request_uri(&mut bytes)
             .parse_http_version(&mut bytes)
-            .parse_headers(&mut bytes);
+            .parse_headers(&mut bytes)
+            .save_body_buffer(buf);
 
         self
+    }
+
+    pub(crate) fn can_parse_more(&self) -> bool {
+        return true;
+    }
+
+    pub(crate) fn build(self) -> Result<Request, Error> {
+        if !self.is_parsed() {
+            return Err(Error::RequestNotParsed);
+        }
+
+        let RequestBuilder {
+            method,
+            uri,
+            http_version,
+            headers,
+            body,
+            partial: _,
+        } = self;
+
+        Ok(Request::new(
+            method.unwrap(),
+            uri.unwrap(),
+            http_version.unwrap(),
+            headers.unwrap(),
+            body.unwrap(),
+        ))
     }
 }
 
@@ -544,10 +546,6 @@ fn push_to_buffer(buf: &mut [u8], byte: u8) {
     buf[len - 1] = byte;
 }
 
-fn check_double_crlf(byte1: u8, byte2: u8, byte3: u8, byte4: u8) {
-    if byte1 == b'\r' && byte3 == b'\r' {}
-}
-
 #[cfg(test)]
 mod request_tests {
     use super::{HttpMethods, HttpVersion, PartialRequest, RequestBuilder};
@@ -555,7 +553,8 @@ mod request_tests {
     #[test]
     fn test_one_pass_parse() {
         let buffer = b"\r\n\r\n\n\nGET /abc HTTP/1.1\r\nAccept: */*\r\nUser-agent: abc\r\n\r\n";
-        let builder = RequestBuilder::<String>::parse(buffer);
+        let mut builder = RequestBuilder::new();
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -581,9 +580,10 @@ mod request_tests {
     }
 
     #[test]
-    fn test_parse_more() {
+    fn test_many_pass_parse() {
         let buffer = b"GE";
-        let mut builder = RequestBuilder::<String>::parse(buffer);
+        let mut builder = RequestBuilder::new();
+        builder.parse(buffer);
 
         assert!(builder.method.is_none());
         assert!(builder.uri.is_none());
@@ -591,7 +591,7 @@ mod request_tests {
         assert!(builder.partial.has_partial());
 
         let buffer = b"T /ab";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_none());
@@ -603,7 +603,7 @@ mod request_tests {
 
         let buffer = b"cd ";
         let empty: Vec<u8> = vec![];
-        builder.parse_more(buffer);
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -611,7 +611,7 @@ mod request_tests {
         assert!(builder.partial.has_partial());
 
         let buffer = b"HTTP";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -621,7 +621,7 @@ mod request_tests {
         assert_match!(builder.partial, PartialRequest::HttpVersion(_));
 
         let buffer = b"/1.1\r\n";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -630,19 +630,22 @@ mod request_tests {
         assert_match!(builder.http_version, Some(HttpVersion::Http11));
 
         let buffer = b"Accept: */*\r";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
         let buffer = b"\n";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
         let buffer = b"User-agent: abc\r\n";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
         let buffer = b"\r";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
         let buffer = b"\n";
-        builder.parse_more(buffer);
+        builder.parse(buffer);
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
         assert!(builder.http_version.is_some());
         assert!(builder.headers.is_some());
+        assert!(builder.partial.is_uninit());
+
+        println!("{:?}", builder.build());
     }
 }

@@ -14,7 +14,8 @@ pub trait ResponseHeader<'a>: Header<'a> {}
 mod accept;
 pub use accept::*;
 
-pub(crate) struct Headers {}
+#[derive(Debug)]
+pub struct Headers {}
 
 impl Headers {
     pub fn from_vector(v: Vec<u8>) -> Result<Headers, Error> {

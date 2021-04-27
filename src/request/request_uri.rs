@@ -1,5 +1,6 @@
 use crate::errors::Error;
 
+#[derive(Debug)]
 pub struct RequestUri {
     uri: String,
 }
