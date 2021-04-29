@@ -1,8 +1,10 @@
 fn byte_to_bool(bytes: [u8; 256]) -> [bool; 256] {
     let mut result = [false; 256];
+
     for i in 0..256 {
         result[i] = bytes[i] != 0;
     }
+
     result
 }
 
@@ -56,6 +58,17 @@ lazy_static! {
 
         result
     };
+
+    /// token = 1*<any CHAR except CTLs or separators>
+    static ref UPPER_ALPHA: [bool; 256] = {
+        let mut result = [false; 256];
+
+        for i in 65..91 {
+            result[i] = true;
+        }
+
+        result
+    };
 }
 
 #[inline]
@@ -73,12 +86,45 @@ pub fn is_token(bytes: &[u8]) -> bool {
     true
 }
 
+#[inline]
+pub fn is_cr(byte: u8) -> bool {
+    byte == 13
+}
+
+#[inline]
+pub fn is_lf(byte: u8) -> bool {
+    byte == 10
+}
+
+#[inline]
+pub fn is_space(byte: u8) -> bool {
+    byte == 32
+}
+
+#[inline]
+pub fn is_horizontal_tab(byte: u8) -> bool {
+    byte == 32
+}
+
+#[inline]
+pub fn is_upper_alpha(byte: u8) -> bool {
+    UPPER_ALPHA[byte as usize]
+}
+
+#[inline]
+pub fn to_lower_case(byte: u8) -> u8 {
+    match is_upper_alpha(byte) {
+        true => byte | 0x20,
+        false => byte,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::TOKEN_CHAR;
 
     #[test]
-    fn test() {
+    fn test_token_char() {
         for i in 65..91 {
             assert_eq!(TOKEN_CHAR[i], true);
         }

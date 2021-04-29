@@ -5,6 +5,7 @@ use crate::helpers::bytes::Bytes;
 use crate::request::{Request, RequestUri};
 use std::mem;
 use std::vec::Vec;
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub enum HttpMethods {
@@ -213,7 +214,7 @@ impl RequestBuilder {
         self.partial = self.partial.append(PartialRequest::Headers(v));
 
         let buffer = self.partial.take_vec();
-        let headers = Headers::from_vector(buffer).expect("invalid http version");
+        let headers = Headers::try_from(buffer).expect("invalid http version");
         self.headers = Some(headers);
 
         self
@@ -634,6 +635,8 @@ mod request_tests {
         let buffer = b"\n";
         builder.parse(buffer);
         let buffer = b"User-agent: abc\r\n";
+        builder.parse(buffer);
+        let buffer = b"Content-length: 4\r\n";
         builder.parse(buffer);
         let buffer = b"\r";
         builder.parse(buffer);

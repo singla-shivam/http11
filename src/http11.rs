@@ -1,6 +1,6 @@
 use crate::{Request, RequestBuilder};
 use std::io::{ErrorKind, Result};
-use std::mem::MaybeUninit;
+// use std::mem::MaybeUninit;
 use tokio::net::{TcpListener, TcpStream};
 
 pub struct Http11 {}

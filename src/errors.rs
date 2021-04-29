@@ -1,9 +1,15 @@
 use std::convert::From;
-use std::{fmt, io};
+use std::{fmt, io, str};
 
 impl From<Error> for io::Error {
     fn from(f: Error) -> Self {
         io::Error::new(io::ErrorKind::InvalidData, f)
+    }
+}
+
+impl From<str::Utf8Error> for Error {
+    fn from(f: str::Utf8Error) -> Self {
+        Error::InvalidUtf8String
     }
 }
 
@@ -52,4 +58,8 @@ errors! {
     (InvalidUri, "Invalid token in Uri");
     (InvalidHttpVersion, "Invalid http version");
     (RequestNotParsed, "Trying to get request before it is not parsed completely");
+    (InvalidHeaderFieldToken, "Header field contains invalid token character");
+    (InvalidCrlf, "Invalid character after \\r.");
+    (InvalidUtf8String, "Invalid utf-8 encoding");
+    (InvalidContentLengthValue, "Content length field contains non digit characters");
 }

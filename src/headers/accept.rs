@@ -6,10 +6,18 @@ pub struct AcceptHeader<'a> {
 }
 
 impl<'a> Header<'a> for AcceptHeader<'a> {
-    const NAME: &'a str = "accept";
+    fn name(&self) -> &'a str {
+        "accept"
+    }
 
-    fn get_value() -> String {
-        return String::from("abc");
+    fn value(&self) -> &'a str {
+        // TODO
+        unimplemented!();
+    }
+
+    fn header_string(&self) -> String {
+        let s = format!("{}: {}", self.name(), self.value());
+        return s;
     }
 }
 
