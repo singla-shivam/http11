@@ -25,9 +25,11 @@ pub trait EntityHeader<'a>: Header<'a> {}
 mod accept;
 mod content_length;
 mod extension_header;
+mod transfer_encoding;
 pub use accept::*;
 pub use content_length::*;
 pub use extension_header::*;
+pub use transfer_encoding::*;
 
 use std::rc::Rc;
 
