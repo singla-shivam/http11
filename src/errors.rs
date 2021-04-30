@@ -15,24 +15,39 @@ impl From<str::Utf8Error> for Error {
 
 macro_rules! errors {
     (
-        $(
-            $(#[$docs:meta])*
-            ($name:ident, $phrase:expr);
-        )+
+        [
+            $(
+                $(#[$docs1:meta])*
+                ($name1:ident, $phrase1:expr);
+            )+
+        ],
+        [
+            $(
+                $(#[$docs2:meta])*
+                ($name2:ident, $type:ty, $phrase2:expr);
+            )+
+        ]
     ) => {
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Debug)]
         pub enum Error {
             $(
-                $(#[$docs])*
-                $name,
+                $(#[$docs1])*
+                $name1,
+            )+
+            $(
+                $(#[$docs2])*
+                $name2($type),
             )+
         }
 
         impl Error {
-            fn desc(&self) -> &'static str {
-                match *self {
+            fn desc(&self) -> String {
+                match &*self {
                     $(
-                        Error::$name => $phrase,
+                        Error::$name1 => String::from($phrase1),
+                    )+
+                    $(
+                        Error::$name2(val) => format!("{}: {:?}", $phrase2, val),
                     )+
                 }
             }
@@ -40,26 +55,27 @@ macro_rules! errors {
 
         impl fmt::Display for Error {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str(self.desc())
+                f.write_str(&self.desc())
             }
         }
 
-        impl std::error::Error for Error {
-            fn description(&self) -> &str {
-                self.desc()
-            }
-        }
+        impl std::error::Error for Error {}
     };
 }
 
 errors! {
-    (NewLine, "Invalid byte in new line");
-    (Token, "Invalid token character");
-    (InvalidUri, "Invalid token in Uri");
-    (InvalidHttpVersion, "Invalid http version");
-    (RequestNotParsed, "Trying to get request before it is not parsed completely");
-    (InvalidHeaderFieldToken, "Header field contains invalid token character");
-    (InvalidCrlf, "Invalid character after \\r.");
-    (InvalidUtf8String, "Invalid utf-8 encoding");
-    (InvalidContentLengthValue, "Content length field contains non digit characters");
+    [
+        (NewLine, "Invalid byte in new line");
+        (Token, "Invalid token character");
+        (InvalidUri, "Invalid token in Uri");
+        (InvalidHttpVersion, "Invalid http version");
+        (RequestNotParsed, "Trying to get request before it is not parsed completely");
+        (InvalidCrlf, "Invalid character after \\r.");
+        (InvalidUtf8String, "Invalid utf-8 encoding");
+        (InvalidContentLengthValue, "Content length field contains non digit characters");
+    ],
+    [
+        (InvalidHeaderFormat, String, "Invalid header format");
+        (InvalidHeaderFieldToken, String, "Header field contains invalid token character");
+    ]
 }

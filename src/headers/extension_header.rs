@@ -21,11 +21,6 @@ impl<'a> Header<'a> for ExtensionHeader<'a> {
     fn value(&self) -> &'a str {
         self.value
     }
-
-    fn header_string(&self) -> String {
-        let s = format!("{}: {}", self.name, self.value);
-        return s;
-    }
 }
 
 impl<'a> EntityHeader<'a> for ExtensionHeader<'a> {}

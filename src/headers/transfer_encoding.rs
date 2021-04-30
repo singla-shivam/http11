@@ -40,11 +40,6 @@ impl<'a> Header<'a> for TransferEncoding<'a> {
     fn value(&self) -> &'a str {
         self.value.get_str()
     }
-
-    fn header_string(&self) -> String {
-        let s = format!("{}: {}", self.name(), self.value());
-        return s;
-    }
 }
 
 impl<'a> GeneralHeader<'a> for TransferEncoding<'a> {}

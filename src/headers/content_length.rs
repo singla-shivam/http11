@@ -1,28 +1,20 @@
-use crate::errors::Error;
+use crate::errors::Error as HttpErrors;
 use crate::headers::{EntityHeader, Header};
+use std::convert::TryFrom;
 use std::str;
 
 pub struct ContentLength<'a> {
     length: &'a str,
 }
 
-impl<'a> ContentLength<'a> {
-    pub fn try_from_vec(
-        v: &Vec<u8>,
-        start: usize,
-        end: usize,
-    ) -> Result<ContentLength, Error> {
-        let buffer = &v[start..end];
-        let str =
-            str::from_utf8(buffer).map_err(|_| Error::InvalidUtf8String)?;
+impl<'a> TryFrom<&'a str> for ContentLength<'a> {
+    type Error = HttpErrors;
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        value
+            .parse::<usize>()
+            .map_err(|_| HttpErrors::InvalidContentLengthValue)?;
 
-        let str = str.trim();
-        str.parse::<usize>()
-            .map_err(|_| Error::InvalidContentLengthValue)?;
-
-        let length = 1;
-
-        Ok(ContentLength { length: str })
+        Ok(ContentLength { length: value })
     }
 }
 
@@ -39,11 +31,6 @@ impl<'a> Header<'a> for ContentLength<'a> {
 
     fn value(&self) -> &'a str {
         self.length
-    }
-
-    fn header_string(&self) -> String {
-        let s = format!("{}: {}", self.name(), self.value());
-        return s;
     }
 }
 

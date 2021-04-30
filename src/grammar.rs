@@ -1,3 +1,5 @@
+use regex::Regex;
+
 fn byte_to_bool(bytes: [u8; 256]) -> [bool; 256] {
     let mut result = [false; 256];
 
@@ -59,7 +61,18 @@ lazy_static! {
         result
     };
 
-    /// token = 1*<any CHAR except CTLs or separators>
+    /// VCHAR = %x21-7E
+    static ref VISIBLE_CHAR: [bool; 256] = {
+        let mut result = [false; 256];
+
+        for i in 0x21..0x7F {
+            result[i] = true;
+        }
+
+        result
+    };
+
+    /// A-Z
     static ref UPPER_ALPHA: [bool; 256] = {
         let mut result = [false; 256];
 
@@ -72,10 +85,16 @@ lazy_static! {
 }
 
 #[inline]
+pub fn is_visible_char(byte: u8) -> bool {
+    VISIBLE_CHAR[byte as usize]
+}
+
+#[inline]
 pub fn is_token_char(byte: u8) -> bool {
     TOKEN_CHAR[byte as usize]
 }
 
+#[inline]
 pub fn is_token(bytes: &[u8]) -> bool {
     for byte in bytes {
         if !is_token_char(*byte) {
@@ -103,7 +122,7 @@ pub fn is_space(byte: u8) -> bool {
 
 #[inline]
 pub fn is_horizontal_tab(byte: u8) -> bool {
-    byte == 32
+    byte == 9
 }
 
 #[inline]
@@ -117,6 +136,14 @@ pub fn to_lower_case(byte: u8) -> u8 {
         true => byte | 0x20,
         false => byte,
     }
+}
+
+#[inline]
+pub fn replace_white_space(s: &str) -> String {
+    let re = Regex::new(r"([\s\t]+)").unwrap();
+    let x = re.replace_all(s, " ");
+    let x = x.into_owned();
+    x
 }
 
 #[cfg(test)]
