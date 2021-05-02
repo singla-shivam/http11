@@ -1,4 +1,5 @@
-use crate::errors::Error;
+use crate::errors::Error as HttpError;
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct RequestUri {
@@ -6,14 +7,17 @@ pub struct RequestUri {
 }
 
 impl RequestUri {
-    pub fn from_vector(v: Vec<u8>) -> Result<RequestUri, Error> {
-        // TODO (singla-shivam) parse URI correctly RFC2396
+    pub fn uri(&self) -> &String {
+        &self.uri
+    }
+}
+
+impl TryFrom<Vec<u8>> for RequestUri {
+    type Error = HttpError;
+
+    fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
         Ok(RequestUri {
             uri: String::from_utf8(v).unwrap(),
         })
-    }
-
-    pub fn uri(&self) -> &String {
-        &self.uri
     }
 }
