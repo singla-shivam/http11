@@ -1,26 +1,34 @@
-use crate::headers::{EntityHeader, Header};
+use crate::headers::{EntityHeader, Header, EXTENSION_HEADER_NAME};
+use std::any::Any;
 use std::marker::PhantomData;
 
 #[derive(Debug)]
-pub struct ExtensionHeader<'a> {
-    name: &'a str,
-    value: &'a str,
+pub struct ExtensionHeader {
+    name: String,
+    value: String,
 }
 
-impl<'a> ExtensionHeader<'a> {
-    pub(crate) fn new(name: &'a str, value: &'a str) -> ExtensionHeader<'a> {
-        ExtensionHeader { name, value }
+impl ExtensionHeader {
+    pub(crate) fn new(name: &str, value: &str) -> ExtensionHeader {
+        ExtensionHeader {
+            name: String::from(name),
+            value: String::from(value),
+        }
     }
 }
 
-impl<'a> Header<'a> for ExtensionHeader<'a> {
-    fn name(&self) -> &'a str {
-        "extension-header"
+impl Header for ExtensionHeader {
+    fn name(&self) -> &str {
+        EXTENSION_HEADER_NAME
     }
 
-    fn value(&self) -> &'a str {
-        self.value
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
-impl<'a> EntityHeader<'a> for ExtensionHeader<'a> {}
+impl EntityHeader for ExtensionHeader {}

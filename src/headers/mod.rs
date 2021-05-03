@@ -4,26 +4,11 @@ use crate::grammar::{
     to_lower_case,
 };
 use crate::headers::{ContentLength, ExtensionHeader};
+use std::any::Any;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::str;
-// use std::marker::PhantomData;
-
-pub trait Header<'a> {
-    fn name(&self) -> &'a str;
-    fn value(&self) -> &'a str;
-    fn header_string(&self) -> String {
-        format!("{}: {}", self.name(), self.value())
-    }
-}
-
-pub trait GeneralHeader<'a>: Header<'a> {}
-
-pub trait RequestHeader<'a>: Header<'a> {}
-
-pub trait ResponseHeader<'a>: Header<'a> {}
-
-pub trait EntityHeader<'a>: Header<'a> {}
 
 mod accept;
 mod content_length;
@@ -34,12 +19,34 @@ pub use content_length::*;
 pub use extension_header::*;
 pub use transfer_encoding::*;
 
-use std::rc::Rc;
+pub trait Header {
+    fn name(&self) -> &str;
+    fn value(&self) -> String;
+    fn as_any(&self) -> &dyn Any;
+    fn header_string(&self) -> String {
+        format!("{}: {}", self.name(), self.value())
+    }
+}
+
+pub trait GeneralHeader: Header {}
+
+pub trait RequestHeader: Header {}
+
+pub trait ResponseHeader: Header {}
+
+pub trait EntityHeader: Header {}
+
+const TRANSFER_ENCODING_HEADER_NAME: &str = "transfer-encoding";
+const ACCEPT_HEADER_NAME: &str = "accept";
+const CONTENT_LENGTH_HEADER_NAME: &str = "content-length";
+const EXTENSION_HEADER_NAME: &str = "extension-header";
 
 #[derive(Debug)]
-pub struct Headers {}
+pub struct Headers {
+    headers: HashMap<String, Box<dyn Header>>,
+}
 
-impl Debug for dyn Header<'_> {
+impl Debug for dyn Header {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.header_string())
     }
@@ -52,7 +59,7 @@ impl Headers {
         header_name_end: usize,
         header_value_start: usize,
         header_end: usize,
-    ) {
+    ) -> Box<dyn Header> {
         let header_name_buffer = &buffer[header_name_start..header_name_end];
         let header_value_buffer = &buffer[header_value_start..header_end];
 
@@ -60,26 +67,43 @@ impl Headers {
         let value = str::from_utf8(header_value_buffer).unwrap();
         let value = replace_white_space(value);
         let value = value.as_str().trim();
+        // TODO check grammar for `value`
 
-        let header: Box<dyn Header> = match header_name_buffer {
-            b"accept" => Box::new(ExtensionHeader::new(name, value)),
-            b"content-length" => {
+        let header: Box<dyn Header> = match name {
+            ACCEPT_HEADER_NAME => Box::new(ExtensionHeader::new(name, value)),
+            CONTENT_LENGTH_HEADER_NAME => {
                 Box::new(ContentLength::try_from(value).unwrap())
+            }
+            TRANSFER_ENCODING_HEADER_NAME => {
+                Box::new(ExtensionHeader::new(name, value))
             }
             _ => Box::new(ExtensionHeader::new(name, value)),
         };
 
         println!("value: {:?}", header.value());
+        header
+    }
+
+    pub fn transfer_encoding(&self) -> Option<&TransferEncoding> {
+        let x = self.headers.get("transfer-encoding");
+
+        if x.is_none() {
+            return None;
+        }
+
+        x.unwrap().as_any().downcast_ref::<TransferEncoding>()
     }
 }
 
-impl TryFrom<Vec<u8>> for Headers {
+impl<'a> TryFrom<Vec<u8>> for Headers {
     type Error = HttpError;
     fn try_from(mut value: Vec<u8>) -> Result<Self, Self::Error> {
         let length = value.len();
         for i in 0..length {
             value[i] = to_lower_case(value[i]);
         }
+
+        let mut headers = HashMap::new();
 
         let mut is_looking_name = true;
         let mut header_name_start = 0;
@@ -133,13 +157,15 @@ impl TryFrom<Vec<u8>> for Headers {
                         ));
                     }
 
-                    Headers::get_header_struct(
+                    let header = Headers::get_header_struct(
                         &value,
                         header_name_start,
                         header_name_end,
                         header_value_start,
                         i - 1, // i points to \n
                     );
+
+                    headers.insert(String::from(header.name()), header);
                     header_name_start = i + 1;
                     is_looking_name = true;
 
@@ -152,7 +178,7 @@ impl TryFrom<Vec<u8>> for Headers {
             }
         }
 
-        Ok(Headers {})
+        Ok(Headers { headers })
     }
 }
 

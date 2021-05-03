@@ -140,10 +140,10 @@ pub fn to_lower_case(byte: u8) -> u8 {
 
 #[inline]
 pub fn replace_white_space(s: &str) -> String {
-    let re = Regex::new(r"([\s\t]+)").unwrap();
-    let x = re.replace_all(s, " ");
-    let x = x.into_owned();
-    x
+    let regex = Regex::new(r"([\s\t]+)").unwrap();
+    let result = regex.replace_all(s, " ");
+    let result = result.into_owned();
+    result
 }
 
 #[cfg(test)]

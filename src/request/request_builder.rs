@@ -194,7 +194,7 @@ impl RequestBuilder {
         self.partial = self.partial.append(PartialRequest::RequestUri(v));
 
         let buffer = self.partial.take_vec();
-        let uri = RequestUri::from_vector(buffer).expect("invalid uri");
+        let uri = RequestUri::try_from(buffer).expect("invalid uri");
         self.uri = Some(uri);
 
         self
@@ -360,7 +360,12 @@ impl RequestBuilder {
     }
 
     pub(crate) fn can_parse_more(&self) -> bool {
-        return true;
+        // headers are not parsed yet, so we can parse more
+        if self.headers.is_none() {
+            return true
+        }
+
+        return false
     }
 
     pub(crate) fn build(self) -> Result<Request, Error> {

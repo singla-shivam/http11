@@ -1,16 +1,17 @@
 use crate::headers::{Header, RequestHeader};
+use std::any::Any;
 
-pub struct AcceptHeader<'a> {
-    typ: &'a str,
-    sub_type: &'a str, // TODO (@vedant) add other fields
+pub struct AcceptHeader {
+    typ: String,
+    sub_type: String, // TODO (@vedant) add other fields
 }
 
-impl<'a> Header<'a> for AcceptHeader<'a> {
-    fn name(&self) -> &'a str {
+impl Header for AcceptHeader {
+    fn name(&self) -> &str {
         "accept"
     }
 
-    fn value(&self) -> &'a str {
+    fn value(&self) -> String {
         // TODO
         unimplemented!();
     }
@@ -19,6 +20,10 @@ impl<'a> Header<'a> for AcceptHeader<'a> {
         let s = format!("{}: {}", self.name(), self.value());
         return s;
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-impl<'a> RequestHeader<'a> for AcceptHeader<'a> {}
+impl RequestHeader for AcceptHeader {}

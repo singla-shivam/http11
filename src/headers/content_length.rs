@@ -1,37 +1,44 @@
 use crate::errors::Error as HttpErrors;
-use crate::headers::{EntityHeader, Header};
+use crate::headers::{EntityHeader, Header, CONTENT_LENGTH_HEADER_NAME};
+use std::any::Any;
 use std::convert::TryFrom;
 use std::str;
 
-pub struct ContentLength<'a> {
-    length: &'a str,
+pub struct ContentLength {
+    length: String,
 }
 
-impl<'a> TryFrom<&'a str> for ContentLength<'a> {
+impl TryFrom<&str> for ContentLength {
     type Error = HttpErrors;
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         value
             .parse::<usize>()
             .map_err(|_| HttpErrors::InvalidContentLengthValue)?;
 
-        Ok(ContentLength { length: value })
+        Ok(ContentLength {
+            length: String::from(value),
+        })
     }
 }
 
-impl<'a> ContentLength<'a> {
+impl ContentLength {
     fn content_length(&self) -> usize {
         self.length.parse::<usize>().unwrap()
     }
 }
 
-impl<'a> Header<'a> for ContentLength<'a> {
-    fn name(&self) -> &'a str {
-        "content-length"
+impl Header for ContentLength {
+    fn name(&self) -> &str {
+        CONTENT_LENGTH_HEADER_NAME
     }
 
-    fn value(&self) -> &'a str {
-        self.length
+    fn value(&self) -> String {
+        self.length.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
-impl<'a> EntityHeader<'a> for ContentLength<'a> {}
+impl EntityHeader for ContentLength {}
