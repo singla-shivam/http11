@@ -4,15 +4,16 @@ use std::ptr;
 pub(crate) struct Bytes<'a> {
     buf: &'a [u8],
     pos: usize,
+    len: usize,
 }
 
 impl<'a> Bytes<'a> {
-    pub fn new(buf: &'a [u8]) -> Bytes {
-        Bytes { buf, pos: 0 }
+    pub fn new(buf: &'a [u8], len: usize) -> Bytes {
+        Bytes { buf, pos: 0, len }
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {

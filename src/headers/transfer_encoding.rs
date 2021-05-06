@@ -1,7 +1,7 @@
 use crate::errors::Error as HttpErrors;
 use crate::headers::{GeneralHeader, Header, TRANSFER_ENCODING_HEADER_NAME};
-use std::convert::TryFrom;
 use std::any::Any;
+use std::convert::TryFrom;
 
 pub struct TransferEncoding {
     encodings: Vec<TransferEncodingValue>,
@@ -10,21 +10,12 @@ pub struct TransferEncoding {
 impl TransferEncoding {
     /// Check if the final encoding is chunked or not
     pub fn is_chunked(&self) -> bool {
-        // if not encoding is present
-        if !self.has_transfer_encoding() {
-            return false;
-        }
-
         let last_encoding = self.encodings.last().unwrap();
 
         match last_encoding {
             TransferEncodingValue::Chunked => true,
             _ => false,
         }
-    }
-
-    pub fn has_transfer_encoding(&self) -> bool {
-        self.encodings.len() > 0
     }
 
     pub fn clone() -> TransferEncoding {

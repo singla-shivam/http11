@@ -2,10 +2,11 @@ use crate::errors::Error;
 use crate::grammar::is_token_char;
 use crate::headers::Headers;
 use crate::helpers::bytes::Bytes;
-use crate::request::{Request, RequestUri};
+use crate::request::{Request, RequestBodyBuilder, RequestUri};
+use std::collections::LinkedList;
+use std::convert::TryFrom;
 use std::mem;
 use std::vec::Vec;
-use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub enum HttpMethods {
@@ -71,7 +72,7 @@ pub struct RequestBuilder {
     uri: Option<RequestUri>,
     http_version: Option<HttpVersion>,
     headers: Option<Headers>,
-    body: Option<Vec<u8>>,
+    body: Option<RequestBodyBuilder>,
     partial: PartialRequest,
 }
 
@@ -167,7 +168,7 @@ impl RequestBuilder {
             uri: None,
             http_version: None,
             headers: None,
-            body: Some(vec![]),
+            body: None,
             partial: PartialRequest::Uninit,
         }
     }
@@ -204,7 +205,8 @@ impl RequestBuilder {
         self.partial = self.partial.append(PartialRequest::HttpVersion(v));
 
         let buffer = self.partial.take_vec();
-        let version = HttpVersion::from_vector(buffer).expect("invalid http version");
+        let version =
+            HttpVersion::from_vector(buffer).expect("invalid http version");
         self.http_version = Some(version);
 
         self
@@ -286,7 +288,8 @@ impl RequestBuilder {
             return self;
         }
 
-        let http_version = parse_http_version(bytes).expect("Invalid http version");
+        let http_version =
+            parse_http_version(bytes).expect("Invalid http version");
 
         match http_version {
             PartialRequest::HttpVersion(v) => {
@@ -319,8 +322,10 @@ impl RequestBuilder {
             previous_buffer = v;
         }
 
-        let mut previous_buffer = Bytes::new(previous_buffer);
-        let headers = parse_headers(bytes, &mut previous_buffer).expect("Invalid headers");
+        let mut previous_buffer =
+            Bytes::new(previous_buffer, previous_buffer.len());
+        let headers = parse_headers(bytes, &mut previous_buffer)
+            .expect("Invalid headers");
 
         match headers {
             PartialRequest::Headers(v) => {
@@ -337,14 +342,56 @@ impl RequestBuilder {
         self
     }
 
-    pub(crate) fn save_body_buffer(&mut self, buf: &[u8]) -> &mut RequestBuilder {
-        let body = self.body.as_mut().unwrap();
-        body.extend_from_slice(buf);
+    fn are_headers_valid(&self) -> Result<bool, Error> {
+        let headers = self.headers.as_ref().unwrap();
+
+        let transfer_encoding = headers.transfer_encoding();
+        if let Some(transfer_encoding) = transfer_encoding {
+            if !transfer_encoding.is_chunked() {
+                // TODO it is an error, send 400
+                return Err(Error::NoChunkedCoding);
+            }
+
+            return Ok(true);
+        }
+
+        let content_length = headers.content_length();
+        return Ok(true);
+    }
+
+    fn are_headers_parsed(&self) -> bool {
+        self.headers.is_some()
+    }
+
+    fn can_have_body(&self) -> bool {
+        let headers = self.headers.as_ref().unwrap();
+
+        let transfer_encoding = headers.transfer_encoding();
+
+        if transfer_encoding.is_some() {
+            return true;
+        }
+
+        let content_length = headers.content_length();
+        return content_length.is_some();
+    }
+
+    pub(crate) fn parse_body(&mut self, bytes: Bytes) -> &mut RequestBuilder {
+        if !self.are_headers_parsed() || !self.can_have_body() {
+            return self;
+        }
+
+        self.body.as_ref().unwrap().parse(bytes);
+
         self
     }
 
-    pub(crate) fn parse(&mut self, buf: &[u8]) -> &RequestBuilder {
-        let mut bytes = Bytes::new(buf);
+    pub(crate) fn parse(
+        &mut self,
+        buf: &[u8],
+        length: usize,
+    ) -> Result<&RequestBuilder, Error> {
+        let mut bytes = Bytes::new(buf, length);
 
         if self.method.is_none() {
             skip_initial_crlf(&mut bytes);
@@ -353,19 +400,47 @@ impl RequestBuilder {
         self.parse_method(&mut bytes)
             .parse_request_uri(&mut bytes)
             .parse_http_version(&mut bytes)
-            .parse_headers(&mut bytes)
-            .save_body_buffer(buf);
+            .parse_headers(&mut bytes);
 
-        self
+        if self.are_headers_parsed() {
+            let headers_valid = self.are_headers_valid();
+            if headers_valid.is_err() {
+                return Err(headers_valid.err().unwrap());
+            }
+
+            if self.body.is_none() {
+                let headers = self.headers.as_ref().unwrap();
+                let transfer_encoding = headers.transfer_encoding();
+                let is_chunked = transfer_encoding.is_some()
+                    && transfer_encoding.unwrap().is_chunked();
+                if is_chunked {
+                    self.body = Some(RequestBodyBuilder::new_chunked());
+                } else {
+                    self.body = Some(RequestBodyBuilder::new_whole());
+                }
+            }
+
+            self.parse_body(bytes);
+        }
+
+        Ok(self)
     }
 
     pub(crate) fn can_parse_more(&self) -> bool {
         // headers are not parsed yet, so we can parse more
         if self.headers.is_none() {
-            return true
+            return true;
         }
 
-        return false
+        if self.can_have_body() {
+            let body = self.body.as_ref();
+            return match body {
+                None => true,
+                Some(b) => !b.is_parsed(),
+            };
+        }
+
+        return false;
     }
 
     pub(crate) fn build(self) -> Result<Request, Error> {
@@ -382,12 +457,14 @@ impl RequestBuilder {
             partial: _,
         } = self;
 
+        let body = LinkedList::new();
+
         Ok(Request::new(
             method.unwrap(),
             uri.unwrap(),
             http_version.unwrap(),
             headers.unwrap(),
-            body.unwrap(),
+            body,
         ))
     }
 }
@@ -400,7 +477,11 @@ fn skip_initial_crlf(bytes: &mut Bytes) {
             Some(b'\r') => {
                 bytes.bump();
                 let next_byte = bytes.bump().unwrap();
-                assert!(next_byte == b'\n', "expected \\n but found {}", next_byte);
+                assert!(
+                    next_byte == b'\n',
+                    "expected \\n but found {}",
+                    next_byte
+                );
             }
             Some(b'\n') => {
                 bytes.bump();
@@ -483,7 +564,10 @@ fn parse_request_uri(bytes: &mut Bytes) -> Result<PartialRequest, Error> {
     get_token_buffer(bytes, on_empty, on_found, verify_character, b' ')
 }
 
-fn parse_headers(bytes: &mut Bytes, previous_bytes: &mut Bytes) -> Result<PartialRequest, Error> {
+fn parse_headers(
+    bytes: &mut Bytes,
+    previous_bytes: &mut Bytes,
+) -> Result<PartialRequest, Error> {
     if bytes.is_empty() {
         return Ok(PartialRequest::Headers(vec![]));
     }
@@ -522,7 +606,8 @@ fn parse_headers(bytes: &mut Bytes, previous_bytes: &mut Bytes) -> Result<Partia
                 push_to_buffer(&mut outstanding_crlf_buffer, b'\r');
                 push_to_buffer(&mut outstanding_crlf_buffer, b'\n');
 
-                let is_double_crlf = &outstanding_crlf_buffer[..] == b"\r\n\r\n";
+                let is_double_crlf =
+                    &outstanding_crlf_buffer[..] == b"\r\n\r\n";
                 if is_double_crlf {
                     let end = bytes.current_pos() - 1;
                     let vec = bytes.copy_buffer(start, end);
@@ -560,7 +645,7 @@ mod request_tests {
     fn test_one_pass_parse() {
         let buffer = b"\r\n\r\n\n\nGET /abc HTTP/1.1\r\nAccept: */*\r\nUser-agent: abc\r\n\r\n";
         let mut builder = RequestBuilder::new();
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -589,7 +674,7 @@ mod request_tests {
     fn test_many_pass_parse() {
         let buffer = b"GE";
         let mut builder = RequestBuilder::new();
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_none());
         assert!(builder.uri.is_none());
@@ -597,7 +682,7 @@ mod request_tests {
         assert!(builder.partial.has_partial());
 
         let buffer = b"T /ab";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_none());
@@ -609,7 +694,7 @@ mod request_tests {
 
         let buffer = b"cd ";
         let empty: Vec<u8> = vec![];
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -617,7 +702,7 @@ mod request_tests {
         assert!(builder.partial.has_partial());
 
         let buffer = b"HTTP";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -627,7 +712,7 @@ mod request_tests {
         assert_match!(builder.partial, PartialRequest::HttpVersion(_));
 
         let buffer = b"/1.1\r\n";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
@@ -636,17 +721,17 @@ mod request_tests {
         assert_match!(builder.http_version, Some(HttpVersion::Http11));
 
         let buffer = b"Accept: */*\r";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
         let buffer = b"\n";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
         let buffer = b"User-agent: abc\r\n";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
         let buffer = b"Content-length: 4\r\n";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
         let buffer = b"\r";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
         let buffer = b"\n";
-        builder.parse(buffer);
+        builder.parse(buffer, buffer.len());
 
         assert!(builder.method.is_some());
         assert!(builder.uri.is_some());
