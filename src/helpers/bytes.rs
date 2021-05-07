@@ -58,6 +58,7 @@ impl<'a> Bytes<'a> {
         self
     }
 
+    /// Copy buffer from index `start` to `end` both inclusive
     pub fn copy_buffer(&mut self, start: usize, end: usize) -> Vec<u8> {
         let size = end - start + 1;
         let mut dest = vec![0; size];
@@ -82,6 +83,31 @@ impl<'a> Iterator for Bytes<'a> {
             Some(byte)
         } else {
             None
+        }
+    }
+}
+
+pub(crate) struct ContinuedBytes<'a> {
+    bytes1: &'a mut Bytes<'a>,
+    bytes2: &'a mut Bytes<'a>,
+}
+
+impl<'a> ContinuedBytes<'a> {
+    pub fn new(
+        bytes1: &'a mut Bytes<'a>,
+        bytes2: &'a mut Bytes<'a>,
+    ) -> ContinuedBytes<'a> {
+        ContinuedBytes { bytes1, bytes2 }
+    }
+}
+
+impl<'a> Iterator for ContinuedBytes<'a> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<u8> {
+        match self.bytes1.next() {
+            Some(b) => Some(b),
+            None => self.bytes2.next(),
         }
     }
 }

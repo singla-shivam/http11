@@ -381,7 +381,7 @@ impl RequestBuilder {
             return self;
         }
 
-        self.body.as_ref().unwrap().parse(bytes);
+        self.body.as_mut().unwrap().parse(bytes);
 
         self
     }

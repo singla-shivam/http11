@@ -156,13 +156,17 @@ impl<'a> TryFrom<Vec<u8>> for Headers {
                     let next_byte = value_iter.next();
                     // no more byte after '\r'
                     if next_byte.is_none() {
-                        return Err(HttpError::InvalidCrlf);
+                        return Err(HttpError::InvalidCrlf(
+                            "No character after \\r".to_string(),
+                        ));
                     }
 
                     let (i, next_byte) = next_byte.unwrap();
                     // if there is not \n after \r
                     if *next_byte != b'\n' {
-                        return Err(HttpError::InvalidCrlf);
+                        let error_string =
+                            format!("Char: {}, in body chunk", next_byte);
+                        return Err(HttpError::InvalidCrlf(error_string));
                     }
 
                     let next_byte = value[i + 1];

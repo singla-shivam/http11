@@ -70,12 +70,12 @@ errors! {
         (InvalidUri, "Invalid token in Uri");
         (InvalidHttpVersion, "Invalid http version");
         (RequestNotParsed, "Trying to get request before it is not parsed completely");
-        (InvalidCrlf, "Invalid character after \\r.");
         (InvalidUtf8String, "Invalid utf-8 encoding");
         (InvalidContentLengthValue, "Content length field contains non digit characters");
         (NoChunkedCoding, "There was transfer-encoding but the last encoding was not chunked");
     ],
     [
+        (InvalidCrlf, String, "Invalid character after \\r.");
         (InvalidHeaderFormat, String, "Invalid header format");
         (InvalidHeaderFieldToken, String, "Header field contains invalid token character");
     ]

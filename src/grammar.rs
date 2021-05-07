@@ -82,6 +82,25 @@ lazy_static! {
 
         result
     };
+
+    /// 0-9, A-F
+    static ref HEX_DIGITS: [bool; 256] = {
+        let mut result = [false; 256];
+
+        for i in 48..58 {
+            result[i] = true;
+        }
+
+        for i in 65..71 {
+            result[i] = true;
+        }
+
+        for i in 97..103 {
+            result[i] = true;
+        }
+
+        result
+    };
 }
 
 #[inline]
@@ -146,9 +165,14 @@ pub fn replace_white_space(s: &str) -> String {
     result
 }
 
+#[inline]
+pub fn is_hex_digit(byte: u8) -> bool {
+    HEX_DIGITS[byte as usize]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::TOKEN_CHAR;
+    use super::{HEX_DIGITS, TOKEN_CHAR};
 
     #[test]
     fn test_token_char() {
@@ -158,6 +182,17 @@ mod tests {
 
         for i in 97..123 {
             assert_eq!(TOKEN_CHAR[i], true);
+        }
+    }
+
+    #[test]
+    fn test_hex_digits() {
+        let str = "0123456789ABCDEFabcdef";
+        let digits: Vec<char> = str.chars().collect();
+        let digits: Vec<u8> = digits.into_iter().map(|c| c as u8).collect();
+
+        for i in 0..=255 {
+            assert_eq!(digits.contains(&i), HEX_DIGITS[i as usize]);
         }
     }
 }
