@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::str;
 
 #[derive(Debug, Default)]
 struct Node {
-    chars: HashMap<char, Node>,
+    children: HashMap<char, Node>,
     is_end_of_word:bool,
-    val: Option<u32>,
+    val: u32,
 }
 
 #[derive(Debug)]
@@ -14,13 +15,19 @@ struct Trie {
 
 impl Trie {
     fn new() -> Trie {
-        Trie { root: Node::default() }
+        
+        let mut trie = Trie { root: Node::default()};
+        trie.add_word("#", 0);
+        for i in 1..27 {
+            trie.add_word( str::from_utf8(&[i+64]).unwrap(), i as u32);
+        }
+        return trie;
     }
 
-    fn add_word(&mut self, string: &str, val: Option<u32>) {
+    fn add_word(&mut self, string: &str, val: u32) {
         let mut node = &mut self.root;
-        for c in string.chars() {
-            node = moving(node).chars
+        for c in string.chars(){
+            node = node.children
                 .entry(c)
                 .or_insert(Node::default());
         }
@@ -32,53 +39,58 @@ impl Trie {
         if string == ""{
             return true;
         }
-        let curr = &mut self.root;
+        let mut curr = &self.root;
         for c in string.chars(){
-            if !curr.chars.contains_key(&c){
+            if !curr.children.contains_key(&c){
                 return false;
             }
+            curr = curr.children.get(&c).unwrap();
         }
         return curr.is_end_of_word;
     }
 
-    fn get_value(&mut self, string : &str) -> Option<u32> {
-        let mut curr = &mut self.root;
+    fn get_value(&mut self, string : &str) -> u32 {
+        let mut curr = &self.root;
         for c in string.chars(){
-            curr = curr;
+            // curr = curr.children.get(&c).unwrap();
+            curr = curr.children.get(&c).expect(format!("{}{}",c,string).as_str());
         }
         return curr.val;
     }
 }
 
-fn moving<T>(t: T) -> T { t }
+// fn moving<T>(t: T) -> T { t }
 
 
-fn compress(string_to_be_compressed : &str) -> &str{
+fn compress(string_to_be_compressed : &str) -> String{
     let string_length = string_to_be_compressed.len();
     let mut start = 27;
-    let output_sequence = "";
+    let mut output_sequence : String= "".to_string();
     let mut trie_dict = Trie::new();
-    let mut current_sequence = string_to_be_compressed.chars().nth(0);
-    let mut next_letter = '#';
-
+    let mut current_sequence = string_to_be_compressed.chars().nth(0).unwrap().to_string();
+    let mut _next_letter = '#';
+    // let mut temp : u32 = 8;
     for i in 0..string_length{
         if i == string_length - 1{
-            next_letter = '#';
+            _next_letter = '#';
         } 
         else{
-            next_letter = string_to_be_compressed.chars().nth(i+1);
+            _next_letter = string_to_be_compressed.chars().nth(i+1).unwrap();
         }
 
-        let mut con_word = current_sequence + next_letter;
+        let con_word = current_sequence.to_string() + _next_letter.to_string().as_str();
 
         if trie_dict.check_word(&con_word){
             current_sequence = con_word;
         }
         else{
-            output_sequence = output_sequence + trie_dict.get_value(&current_sequence);
-            trie_dict.add_word(con_word, start);
+            // if trie_dict.check_word(&current_sequence){
+            //     temp = trie_dict.get_value(&current_sequence).unwrap();
+            // }
+            output_sequence = output_sequence + &trie_dict.get_value(&current_sequence).to_string();
+            trie_dict.add_word(&con_word, start);
             start+=1;
-            current_sequence = next_letter;
+            current_sequence = _next_letter.to_string();
         };
     }
     return output_sequence;
@@ -87,12 +99,8 @@ fn compress(string_to_be_compressed : &str) -> &str{
 
 fn main() {
     let string = "TOBEORNOTTOBEORTOBEORNOT";
-    let mut output = compress(string);
+    let output = compress(&string);
     println!("{}",output);
-    
-    let mut trie = Trie::new();
-    trie.add_word("foo", Some(1));
-    trie.add_word("foobar", Some(2));
-    println!("{}",trie.check_word("foo"));
-    println!("{:#?}", trie);
+   
+    // println!("{:?}", trie);
 }
