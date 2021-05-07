@@ -28,22 +28,23 @@ impl Http11 {
 
             stream.readable().await?;
 
-            match stream.try_read(&mut buffer) {
+            let bytes_read = match stream.try_read(&mut buffer) {
                 Ok(0) => {
                     println!("0 byte");
                     break;
                 }
                 // Limit the number of bytes read
                 // Ok(n) => (),
-                Ok(n) => println!("{}", n),
+                Ok(n) => n,
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     continue;
                 }
                 Err(e) => {
                     return Err(e.into());
                 }
-            }
-            request_builder.parse(&buffer);
+            };
+
+            request_builder.parse(&buffer, bytes_read);
         }
 
         let request = request_builder.build()?;

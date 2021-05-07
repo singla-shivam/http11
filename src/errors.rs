@@ -73,6 +73,7 @@ errors! {
         (InvalidCrlf, "Invalid character after \\r.");
         (InvalidUtf8String, "Invalid utf-8 encoding");
         (InvalidContentLengthValue, "Content length field contains non digit characters");
+        (NoChunkedCoding, "There was transfer-encoding but the last encoding was not chunked");
     ],
     [
         (InvalidHeaderFormat, String, "Invalid header format");

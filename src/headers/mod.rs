@@ -4,6 +4,7 @@ use crate::grammar::{
     to_lower_case,
 };
 use crate::headers::{ContentLength, ExtensionHeader};
+use paste::paste;
 use std::any::Any;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -41,6 +42,26 @@ const ACCEPT_HEADER_NAME: &str = "accept";
 const CONTENT_LENGTH_HEADER_NAME: &str = "content-length";
 const EXTENSION_HEADER_NAME: &str = "extension-header";
 
+macro_rules! get_header {
+    ($(
+        $(#[$docs:meta])*
+        ($name1:ident, $name2:ident);
+    )*) => {
+        $(
+            paste! {
+                $(#[$docs])*
+                pub fn [<$name1:snake>](&self) -> Option<&[<$name1>]> {
+                    let h = self.headers.get($name2);
+                    match h {
+                        None => None,
+                        Some(x) => x.as_any().downcast_ref::<[<$name1>]>(),
+                    }
+                }
+            }
+        )*
+    };
+}
+
 #[derive(Debug)]
 pub struct Headers {
     headers: HashMap<String, Box<dyn Header>>,
@@ -59,7 +80,7 @@ impl Headers {
         header_name_end: usize,
         header_value_start: usize,
         header_end: usize,
-    ) -> Box<dyn Header> {
+    ) -> Option<Box<dyn Header>> {
         let header_name_buffer = &buffer[header_name_start..header_name_end];
         let header_value_buffer = &buffer[header_value_start..header_end];
 
@@ -69,29 +90,28 @@ impl Headers {
         let value = value.as_str().trim();
         // TODO check grammar for `value`
 
+        if value == "" {
+            return None;
+        }
+
         let header: Box<dyn Header> = match name {
             ACCEPT_HEADER_NAME => Box::new(ExtensionHeader::new(name, value)),
             CONTENT_LENGTH_HEADER_NAME => {
                 Box::new(ContentLength::try_from(value).unwrap())
             }
             TRANSFER_ENCODING_HEADER_NAME => {
-                Box::new(ExtensionHeader::new(name, value))
+                Box::new(TransferEncoding::try_from(value).unwrap())
             }
             _ => Box::new(ExtensionHeader::new(name, value)),
         };
 
         println!("value: {:?}", header.value());
-        header
+        Some(header)
     }
 
-    pub fn transfer_encoding(&self) -> Option<&TransferEncoding> {
-        let x = self.headers.get("transfer-encoding");
-
-        if x.is_none() {
-            return None;
-        }
-
-        x.unwrap().as_any().downcast_ref::<TransferEncoding>()
+    get_header! {
+        (TransferEncoding, TRANSFER_ENCODING_HEADER_NAME);
+        (ContentLength, CONTENT_LENGTH_HEADER_NAME);
     }
 }
 
@@ -165,7 +185,11 @@ impl<'a> TryFrom<Vec<u8>> for Headers {
                         i - 1, // i points to \n
                     );
 
-                    headers.insert(String::from(header.name()), header);
+                    if let Some(header) = header {
+                        // TODO handle multiple header values
+                        headers.insert(String::from(header.name()), header);
+                    }
+
                     header_name_start = i + 1;
                     is_looking_name = true;
 
