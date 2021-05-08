@@ -105,7 +105,7 @@ impl Headers {
             _ => Box::new(ExtensionHeader::new(name, value)),
         };
 
-        println!("value: {:?}", header.value());
+        // println!("name: {:?}\tvalue: {:?}", header.name(), header.value());
         Some(header)
     }
 

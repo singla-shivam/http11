@@ -1,14 +1,16 @@
 use std::boxed::Box;
+use std::ops::{Index, IndexMut};
 use std::ptr;
 
-pub(crate) struct Bytes<'a> {
-    buf: &'a [u8],
+#[derive(Debug)]
+pub(crate) struct Bytes {
+    buf: Vec<u8>,
     pos: usize,
     len: usize,
 }
 
-impl<'a> Bytes<'a> {
-    pub fn new(buf: &'a [u8], len: usize) -> Bytes {
+impl Bytes {
+    pub fn new(buf: Vec<u8>, len: usize) -> Bytes {
         Bytes { buf, pos: 0, len }
     }
 
@@ -43,8 +45,12 @@ impl<'a> Bytes<'a> {
         byte
     }
 
-    pub fn buffer(&self) -> &'a [u8] {
-        self.buf
+    pub fn buffer(&self) -> &Vec<u8> {
+        &self.buf
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.buf
     }
 
     pub fn advance(&mut self, count: isize) -> &Bytes {
@@ -73,7 +79,21 @@ impl<'a> Bytes<'a> {
     }
 }
 
-impl<'a> Iterator for Bytes<'a> {
+impl Index<usize> for Bytes {
+    type Output = u8;
+
+    fn index(&self, i: usize) -> &Self::Output {
+        &self.buffer()[i]
+    }
+}
+
+impl IndexMut<usize> for Bytes {
+    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
+        &mut self.buffer_mut()[i]
+    }
+}
+
+impl Iterator for Bytes {
     type Item = u8;
 
     fn next(&mut self) -> Option<u8> {
@@ -87,27 +107,140 @@ impl<'a> Iterator for Bytes<'a> {
     }
 }
 
-pub(crate) struct ContinuedBytes<'a> {
-    bytes1: &'a mut Bytes<'a>,
-    bytes2: &'a mut Bytes<'a>,
+#[macro_export]
+macro_rules! fragmented_bytes {
+    () => ({
+        {
+            let temp_vec = vec![];
+            FragmentedBytes::new(temp_vec)
+        }
+    });
+    ($($x:expr),+) => (
+        {
+            let mut temp_vec: Vec<Bytes> = Vec::new();
+            $(
+                temp_vec.push($x);
+            )+
+            FragmentedBytes::new(temp_vec)
+        }
+    );
 }
 
-impl<'a> ContinuedBytes<'a> {
-    pub fn new(
-        bytes1: &'a mut Bytes<'a>,
-        bytes2: &'a mut Bytes<'a>,
-    ) -> ContinuedBytes<'a> {
-        ContinuedBytes { bytes1, bytes2 }
+#[derive(Debug)]
+pub(crate) struct FragmentedBytes {
+    bytes_vec: Vec<Bytes>,
+    read_pos: usize,
+}
+
+impl FragmentedBytes {
+    pub fn new(bytes_vec: Vec<Bytes>) -> FragmentedBytes {
+        FragmentedBytes {
+            bytes_vec,
+            read_pos: 0,
+        }
+    }
+
+    pub fn push_bytes(&mut self, bytes: Bytes) {
+        self.bytes_vec.push(bytes);
+    }
+
+    pub fn iter(&mut self) -> FragmentedBytesIterator<'_> {
+        FragmentedBytesIterator::new(self)
+    }
+
+    pub fn read_pos(&self) -> usize {
+        self.read_pos
+    }
+
+    pub fn set_read_pos(&mut self, pos: usize) {
+        self.read_pos = pos;
+    }
+
+    /// Copy buffer from `self.read_pos` to `end` both inclusive
+    pub fn copy_buffer(&mut self, end: usize) -> Vec<u8> {
+        let len = end - self.read_pos() + 1;
+        let mut vector: Vec<u8> = Vec::with_capacity(len);
+        let mut iter = self.iter();
+
+        for i in 0..len {
+            vector.push(iter.next().unwrap());
+        }
+
+        return vector;
     }
 }
 
-impl<'a> Iterator for ContinuedBytes<'a> {
+pub(crate) struct FragmentedBytesIterator<'a> {
+    fragmented_bytes: &'a mut FragmentedBytes,
+    current_pos: usize,
+}
+
+impl<'a> FragmentedBytesIterator<'a> {
+    pub fn new(
+        fragmented_bytes: &'a mut FragmentedBytes,
+    ) -> FragmentedBytesIterator<'a> {
+        let current_pos = fragmented_bytes.read_pos();
+        FragmentedBytesIterator {
+            fragmented_bytes,
+            current_pos,
+        }
+    }
+
+    pub fn current_pos(&self) -> usize {
+        self.current_pos
+    }
+}
+
+impl<'a> Iterator for FragmentedBytesIterator<'a> {
     type Item = u8;
 
     fn next(&mut self) -> Option<u8> {
-        match self.bytes1.next() {
-            Some(b) => Some(b),
-            None => self.bytes2.next(),
+        let mut c = self.current_pos;
+        for bytes in &mut self.fragmented_bytes.bytes_vec {
+            if c < bytes.len() {
+                self.current_pos += 1;
+                return Some(bytes[c]);
+            }
+
+            c -= bytes.len();
+        }
+
+        return None;
+    }
+}
+
+#[cfg(test)]
+mod bytes_test {
+    use super::{Bytes, FragmentedBytes};
+
+    fn create_fragmented_bytes() -> FragmentedBytes {
+        let bytes1 = Bytes::new(vec![1, 2, 3, 4], 4);
+        let bytes2 = Bytes::new(vec![5, 6, 7, 8], 4);
+        let bytes3 = Bytes::new(vec![11, 12, 13, 14], 4);
+        let bytes4 = Bytes::new(vec![15, 16, 17, 18], 4);
+
+        fragmented_bytes![bytes1, bytes2, bytes3, bytes4]
+    }
+
+    #[test]
+    fn test_create_fragmented_bytes() {
+        let expected_vector =
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18];
+
+        let mut bytes = create_fragmented_bytes();
+
+        let iter1 = bytes.iter();
+        let mut v1 = expected_vector.iter();
+
+        for i in iter1 {
+            assert_eq!(*v1.next().unwrap(), i);
+        }
+
+        let iter1 = bytes.iter();
+        let mut v1 = expected_vector.iter();
+
+        for i in iter1 {
+            assert_eq!(*v1.next().unwrap(), i);
         }
     }
 }
