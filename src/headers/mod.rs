@@ -1,7 +1,7 @@
 use crate::errors::Error as HttpError;
 use crate::grammar::{
-    is_cr, is_horizontal_tab, is_space, is_token_char, replace_white_space,
-    to_lower_case,
+    is_cr, is_horizontal_tab, is_space, is_token, is_token_char,
+    is_vchar_sequence_with_white_space, replace_white_space, to_lower_case,
 };
 use crate::headers::{ContentLength, ExtensionHeader};
 use paste::paste;
@@ -37,30 +37,51 @@ pub trait ResponseHeader: Header {}
 
 pub trait EntityHeader: Header {}
 
-const TRANSFER_ENCODING_HEADER_NAME: &str = "transfer-encoding";
-const ACCEPT_HEADER_NAME: &str = "accept";
-const CONTENT_LENGTH_HEADER_NAME: &str = "content-length";
-const EXTENSION_HEADER_NAME: &str = "extension-header";
+macro_rules! apply_header_names {
+    ($macro_name:ident) => {
+        $macro_name! {
+            "transfer-encoding";
+            "content-length";
+        }
+    };
+}
+
+macro_rules! header_names_constants {
+    ($(
+        $(#[$docs:meta])*
+        $name:expr;
+    )*) => {
+        $(
+            paste! {
+                const [<$name:snake:upper _HEADER_NAME>]: &str = $name;
+            }
+        )*
+    };
+}
 
 macro_rules! get_header {
     ($(
         $(#[$docs:meta])*
-        ($name1:ident, $name2:ident);
+        $name:expr;
     )*) => {
         $(
             paste! {
                 $(#[$docs])*
-                pub fn [<$name1:snake>](&self) -> Option<&[<$name1>]> {
-                    let h = self.headers.get($name2);
+                pub fn [<$name:snake>](&self) -> Option<&[<$name:camel>]> {
+                    let h = self.headers.get([<$name:snake:upper _HEADER_NAME>]);
                     match h {
                         None => None,
-                        Some(x) => x.as_any().downcast_ref::<[<$name1>]>(),
+                        Some(x) => x.as_any().downcast_ref::<[<$name:camel>]>(),
                     }
                 }
             }
         )*
     };
 }
+
+apply_header_names!(header_names_constants);
+const ACCEPT_HEADER_NAME: &str = "accept";
+const EXTENSION_HEADER_NAME: &str = "extension-header";
 
 #[derive(Debug)]
 pub struct Headers {
@@ -74,22 +95,7 @@ impl Debug for dyn Header {
 }
 
 impl Headers {
-    fn get_header_struct(
-        buffer: &Vec<u8>,
-        header_name_start: usize,
-        header_name_end: usize,
-        header_value_start: usize,
-        header_end: usize,
-    ) -> Option<Box<dyn Header>> {
-        let header_name_buffer = &buffer[header_name_start..header_name_end];
-        let header_value_buffer = &buffer[header_value_start..header_end];
-
-        let name = str::from_utf8(header_name_buffer).unwrap();
-        let value = str::from_utf8(header_value_buffer).unwrap();
-        let value = replace_white_space(value);
-        let value = value.as_str().trim();
-        // TODO check grammar for `value`
-
+    fn get_header_struct(name: &str, value: &str) -> Option<Box<dyn Header>> {
         if value == "" {
             return None;
         }
@@ -105,104 +111,60 @@ impl Headers {
             _ => Box::new(ExtensionHeader::new(name, value)),
         };
 
-        // println!("name: {:?}\tvalue: {:?}", header.name(), header.value());
         Some(header)
     }
 
-    get_header! {
-        (TransferEncoding, TRANSFER_ENCODING_HEADER_NAME);
-        (ContentLength, CONTENT_LENGTH_HEADER_NAME);
-    }
+    apply_header_names!(get_header);
 }
 
-impl<'a> TryFrom<Vec<u8>> for Headers {
+impl<'a> TryFrom<String> for Headers {
     type Error = HttpError;
-    fn try_from(mut value: Vec<u8>) -> Result<Self, Self::Error> {
-        let length = value.len();
-        for i in 0..length {
-            value[i] = to_lower_case(value[i]);
-        }
 
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         let mut headers = HashMap::new();
 
-        let mut is_looking_name = true;
-        let mut header_name_start = 0;
-        let mut header_name_end = 0;
-        let mut header_value_start = 0;
-        let mut value_iter = value.iter().enumerate();
+        let parts = value.split("\r\n");
 
-        while let Some((i, byte)) = value_iter.next() {
-            let byte = to_lower_case(*byte);
-
-            if is_looking_name {
-                match byte {
-                    b':' => {
-                        header_name_end = i;
-                        is_looking_name = false;
-                        header_value_start = i + 1;
-                        continue;
-                    }
-                    _ => (),
-                }
-                if !is_token_char(byte) {
-                    return Err(HttpError::InvalidHeaderFieldToken(
-                        byte.to_string(),
-                    ));
-                }
+        for part in parts {
+            if is_continued_field(part) {
+                return Err(HttpError::InvalidHeaderFormat(format!(
+                    "The line continuation with space or tab is not allowed:- {}",
+                    part
+                )));
             }
 
-            match byte {
-                b'\r' => {
-                    let next_byte = value_iter.next();
-                    // no more byte after '\r'
-                    if next_byte.is_none() {
-                        return Err(HttpError::InvalidCrlf(
-                            "No character after \\r".to_string(),
-                        ));
-                    }
+            let colon_index = part.find(":");
+            if colon_index.is_none() {
+                return Err(HttpError::InvalidHeaderFormat(format!(
+                    "The header field line does not contain colon:- {}",
+                    part
+                )));
+            }
 
-                    let (i, next_byte) = next_byte.unwrap();
-                    // if there is not \n after \r
-                    if *next_byte != b'\n' {
-                        let error_string =
-                            format!("Char: {}, in body chunk", next_byte);
-                        return Err(HttpError::InvalidCrlf(error_string));
-                    }
+            let colon_index = colon_index.unwrap();
+            let (name, value) = part.split_at(colon_index);
+            let name = name.to_lowercase();
+            let value = &value[1..];
+            let value = replace_white_space(value.trim());
+            let value = value.as_str();
 
-                    let next_byte = value[i + 1];
+            if !is_token(name.as_bytes()) {
+                return Err(HttpError::InvalidHeaderField(format!(
+                    "The header field-name has invalid character:- {}",
+                    name
+                )));
+            }
 
-                    // There was LWS indicating continuation of the field-value
-                    // It is deprecated in RFC 7230
-                    // https://tools.ietf.org/pdf/rfc7230.pdf#page=26
-                    if is_space(next_byte) || is_horizontal_tab(next_byte) {
-                        // TODO respond with 400
-                        return Err(HttpError::InvalidHeaderFormat(
-                            "The line continuation with space or tab is not allowed.".to_string(),
-                        ));
-                    }
+            if !is_vchar_sequence_with_white_space(value.as_bytes()) {
+                return Err(HttpError::InvalidHeaderFieldValue(format!(
+                    "{}",
+                    value
+                )));
+            }
 
-                    let header = Headers::get_header_struct(
-                        &value,
-                        header_name_start,
-                        header_name_end,
-                        header_value_start,
-                        i - 1, // i points to \n
-                    );
-
-                    if let Some(header) = header {
-                        // TODO handle multiple header values
-                        headers.insert(String::from(header.name()), header);
-                    }
-
-                    header_name_start = i + 1;
-                    is_looking_name = true;
-
-                    if is_cr(next_byte) {
-                        // TODO it was last CRLF- done parsing
-                        unimplemented!();
-                    }
-                }
-                _ => continue,
+            let header = Headers::get_header_struct(name.as_str(), value);
+            if let Some(header) = header {
+                headers.insert(header.name().to_string(), header);
             }
         }
 
@@ -210,42 +172,86 @@ impl<'a> TryFrom<Vec<u8>> for Headers {
     }
 }
 
+fn is_continued_field(field: &str) -> bool {
+    let space_index = field.find(" ");
+    let tab_index = field.find("\t");
+
+    match (space_index, tab_index) {
+        (None, None) => false,
+        (Some(0), _) | (_, Some(0)) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod tests_header {
     use super::Headers;
-    use crate::assert_match;
     use crate::errors::Error;
+    use crate::{assert_match, assert_match_error};
     use std::convert::TryFrom;
+    use std::str;
 
     #[test]
     fn test_respond_throw_error_invalid_header_with_space_before_colon() {
         // TODO write integrations test too to check it
-        let buffer = b"accept : */*\r\nuser-agent : abc\r\n\r\n";
-        let result = Headers::try_from(buffer.to_vec());
+        let buffer = "accept : */*\r\nuser-agent : abc";
+        let result = Headers::try_from(buffer.to_string());
         assert!(result.is_err());
 
         let result = result.err().unwrap();
-        let space_string = String::from("32");
-        assert_eq!(
-            result.to_string(),
-            Error::InvalidHeaderFieldToken(space_string).to_string()
-        );
+        let expected_error = Error::InvalidHeaderField(format!(
+            "The header field-name has invalid character:- accept "
+        ));
+        assert_match_error!(result, expected_error);
     }
 
     #[test]
-    fn test_respond_throw_error_for_header_field_continuation() {
+    fn test_throw_error_for_header_field_continuation() {
         // TODO write integrations test too to check it
-        let buffer = b"accept: */*\r\nuser-agent: abc\r\n\tcontinued\r\n\r\n";
-        let result = Headers::try_from(buffer.to_vec());
+        let buffer = "accept: */*\r\nuser-agent: abc\r\n\tcontinued";
+        let result = Headers::try_from(buffer.to_string());
         assert!(result.is_err());
 
         let result = result.err().unwrap();
-        let space_string = String::from(
-            "The line continuation with space or tab is not allowed.",
-        );
-        assert_eq!(
-            result.to_string(),
-            Error::InvalidHeaderFormat(space_string).to_string()
-        );
+        let expected_error = Error::InvalidHeaderFormat(format!(
+            "The line continuation with space or tab is not allowed:- \tcontinued"
+        ));
+        assert_match_error!(result, expected_error);
+    }
+
+    #[test]
+    fn test_when_no_colon_in_header_field() {
+        let buffer = "accept */*\r\nuser-agent: abc";
+        let result = Headers::try_from(buffer.to_string());
+        assert!(result.is_err());
+
+        let result = result.err().unwrap();
+        let expected_error = Error::InvalidHeaderFormat(format!(
+            "The header field line does not contain colon:- accept */*"
+        ));
+        assert_match_error!(result, expected_error);
+    }
+
+    #[test]
+    fn test_invalid_char_in_value() {
+        let buffer = "accept: abcdfd\u{12}";
+        let result = Headers::try_from(buffer.to_string());
+        assert!(result.is_err());
+
+        let result = result.err().unwrap();
+        let expected_error =
+            Error::InvalidHeaderFieldValue(format!("abcdfd\u{12}"));
+        assert_match_error!(result, expected_error);
+    }
+
+    #[test]
+    fn test_valid_char_in_value() {
+        let mut buffer = "accept: ab cd\t".to_string();
+        for i in 33..=126 {
+            buffer += str::from_utf8(&[i]).unwrap();
+        }
+
+        let result = Headers::try_from(buffer);
+        assert!(result.is_ok());
     }
 }

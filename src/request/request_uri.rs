@@ -12,12 +12,10 @@ impl RequestUri {
     }
 }
 
-impl TryFrom<Vec<u8>> for RequestUri {
+impl TryFrom<String> for RequestUri {
     type Error = HttpError;
 
-    fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
-        Ok(RequestUri {
-            uri: String::from_utf8(v).unwrap(),
-        })
+    fn try_from(v: String) -> Result<Self, Self::Error> {
+        Ok(RequestUri { uri: v })
     }
 }

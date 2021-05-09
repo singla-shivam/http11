@@ -32,6 +32,12 @@ pub(crate) fn look_for_crlf(bytes: &mut FragmentedBytes) -> Option<Vec<u8>> {
     return look_for_delimiter(bytes, &b"\r\n".to_vec());
 }
 
+pub(crate) fn look_for_double_crlf(
+    bytes: &mut FragmentedBytes,
+) -> Option<Vec<u8>> {
+    return look_for_delimiter(bytes, &b"\r\n\r\n".to_vec());
+}
+
 fn push_to_buffer(buf: &mut Vec<u8>, byte: u8) {
     let len = buf.len();
 
@@ -47,9 +53,43 @@ fn push_to_buffer(buf: &mut Vec<u8>, byte: u8) {
     buf[len - 1] = byte;
 }
 
+pub(crate) fn skip_initial_crlf(bytes: &mut FragmentedBytes) -> bool {
+    let mut bytes_iter = bytes.iter();
+    loop {
+        let byte = bytes_iter.peek();
+
+        match byte {
+            Some(b'\r') => {
+                bytes_iter.next();
+                let next_byte = bytes_iter.next();
+                if next_byte.is_none() {
+                    return false;
+                }
+
+                let next_byte = next_byte.unwrap();
+                match next_byte {
+                    b'\n' => continue,
+                    _ => {
+                        // TODO error after \r
+                    }
+                }
+            }
+            Some(b'\n') => {
+                bytes_iter.next();
+            }
+            Some(_) => {
+                let current_pos = bytes_iter.current_pos();
+                bytes.set_read_pos(current_pos);
+                return true;
+            }
+            None => return false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests_parser {
-    use super::{look_for_crlf, look_for_delimiter};
+    use super::*;
     use crate::helpers::bytes::{Bytes, FragmentedBytes};
 
     #[test]
@@ -130,5 +170,64 @@ mod tests_parser {
         let buffer = look_for_delimiter(&mut bytes, &delimiter);
         assert!(buffer.is_some());
         assert_eq!(vec![21, 22, 23], buffer.unwrap());
+    }
+
+    #[test]
+    fn test_skip_crlf() {
+        let mut buffer = vec![];
+        for i in 1..100 {
+            buffer.push(b'\r');
+            buffer.push(b'\n');
+        }
+
+        buffer.push(b'A');
+        let len = buffer.len();
+        let bytes = Bytes::new(buffer, len);
+        let mut bytes = fragmented_bytes![bytes];
+
+        let result = skip_initial_crlf(&mut bytes);
+        assert!(result);
+
+        let buffer = bytes.copy_buffer(len - 1);
+        assert_eq!(buffer, vec![65]);
+    }
+
+    #[test]
+    fn test_skip_crlf_no_lf_after_cr() {
+        let mut buffer = vec![];
+        for i in 1..5 {
+            buffer.push(b'\r');
+            buffer.push(b'\n');
+        }
+
+        buffer.push(b'\r');
+        let len = buffer.len();
+        let bytes = Bytes::new(buffer, len);
+        let mut bytes = fragmented_bytes![bytes];
+
+        let result = skip_initial_crlf(&mut bytes);
+        assert!(!result);
+
+        let buffer = bytes.copy_buffer(len - 1);
+        assert_eq!(buffer, vec![13, 10, 13, 10, 13, 10, 13, 10, 13]);
+    }
+
+    #[test]
+    fn test_skip_crlf_no_char_to_read() {
+        let mut buffer = vec![];
+        for i in 1..5 {
+            buffer.push(b'\r');
+            buffer.push(b'\n');
+        }
+
+        let len = buffer.len();
+        let bytes = Bytes::new(buffer, len);
+        let mut bytes = fragmented_bytes![bytes];
+
+        let result = skip_initial_crlf(&mut bytes);
+        assert!(!result);
+
+        let buffer = bytes.copy_buffer(len - 1);
+        assert_eq!(buffer, vec![13, 10, 13, 10, 13, 10, 13, 10]);
     }
 }

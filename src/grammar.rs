@@ -125,6 +125,32 @@ pub fn is_token(bytes: &[u8]) -> bool {
 }
 
 #[inline]
+pub fn is_vchar_sequence(bytes: &[u8]) -> bool {
+    for byte in bytes {
+        if !is_visible_char(*byte) {
+            return false;
+        }
+    }
+
+    true
+}
+
+#[inline]
+pub fn is_vchar_sequence_with_white_space(bytes: &[u8]) -> bool {
+    for byte in bytes {
+        let b = *byte;
+        let is_legal =
+            is_visible_char(b) || is_space(b) || is_horizontal_tab(b);
+
+        if !is_legal {
+            return false;
+        }
+    }
+
+    true
+}
+
+#[inline]
 pub fn is_cr(byte: u8) -> bool {
     byte == 13
 }

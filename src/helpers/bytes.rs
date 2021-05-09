@@ -189,20 +189,33 @@ impl<'a> FragmentedBytesIterator<'a> {
     pub fn current_pos(&self) -> usize {
         self.current_pos
     }
+
+    pub fn peek(&self) -> Option<u8> {
+        self.at_current_pos()
+    }
+
+    fn at_current_pos(&self) -> Option<u8> {
+        let mut c = self.current_pos;
+        for bytes in &self.fragmented_bytes.bytes_vec {
+            if c < bytes.len() {
+                return Some(bytes[c]);
+            }
+
+            c -= bytes.len();
+        }
+
+        return None;
+    }
 }
 
 impl<'a> Iterator for FragmentedBytesIterator<'a> {
     type Item = u8;
 
     fn next(&mut self) -> Option<u8> {
-        let mut c = self.current_pos;
-        for bytes in &mut self.fragmented_bytes.bytes_vec {
-            if c < bytes.len() {
-                self.current_pos += 1;
-                return Some(bytes[c]);
-            }
-
-            c -= bytes.len();
+        let byte = self.at_current_pos();
+        if byte.is_some() {
+            self.current_pos += 1;
+            return byte;
         }
 
         return None;
@@ -229,15 +242,23 @@ mod bytes_test {
 
         let mut bytes = create_fragmented_bytes();
 
-        let iter1 = bytes.iter();
+        let mut iter1 = bytes.iter();
         let mut v1 = expected_vector.iter();
 
+        assert!(iter1.next().is_some());
+        v1.next();
         for i in iter1 {
             assert_eq!(*v1.next().unwrap(), i);
         }
 
-        let iter1 = bytes.iter();
+        let mut iter1 = bytes.iter();
         let mut v1 = expected_vector.iter();
+
+        assert_eq!(iter1.peek().unwrap(), *v1.next().unwrap());
+        iter1.next();
+
+        assert_eq!(iter1.peek().unwrap(), *v1.next().unwrap());
+        iter1.next();
 
         for i in iter1 {
             assert_eq!(*v1.next().unwrap(), i);

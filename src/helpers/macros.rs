@@ -13,3 +13,13 @@ macro_rules! assert_match {
         }, $($arg)*)
     }
 }
+
+#[macro_export]
+macro_rules! assert_match_error {
+    ($expression1:expr, $expression2:expr) => {
+        assert_eq!($expression1.to_string(), $expression2.to_string());
+    };
+    ($expression1:expr, $expression2:expr, $($arg:tt)+) => {
+        assert_eq!($expression1.to_string(), $expression2.to_string(), $($arg)+);
+    };
+}
