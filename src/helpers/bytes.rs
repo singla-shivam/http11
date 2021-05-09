@@ -1,6 +1,6 @@
 use std::boxed::Box;
 use std::ops::{Index, IndexMut};
-use std::ptr;
+use std::{mem, ptr};
 
 #[derive(Debug)]
 pub(crate) struct Bytes {
@@ -77,6 +77,10 @@ impl Bytes {
 
         dest
     }
+
+    pub fn split_off(&mut self, index: usize) {
+        self.buf = self.buf.split_off(index);
+    }
 }
 
 impl Index<usize> for Bytes {
@@ -107,6 +111,12 @@ impl Iterator for Bytes {
     }
 }
 
+impl Default for Bytes {
+    fn default() -> Self {
+        Bytes::new(vec![], 0)
+    }
+}
+
 #[macro_export]
 macro_rules! fragmented_bytes {
     () => ({
@@ -130,17 +140,26 @@ macro_rules! fragmented_bytes {
 pub(crate) struct FragmentedBytes {
     bytes_vec: Vec<Bytes>,
     read_pos: usize,
+    total_len: usize,
 }
 
 impl FragmentedBytes {
     pub fn new(bytes_vec: Vec<Bytes>) -> FragmentedBytes {
+        let mut total_len = 0;
+
+        for bytes in &bytes_vec {
+            total_len += bytes.len();
+        }
+
         FragmentedBytes {
             bytes_vec,
             read_pos: 0,
+            total_len,
         }
     }
 
     pub fn push_bytes(&mut self, bytes: Bytes) {
+        self.total_len += bytes.len();
         self.bytes_vec.push(bytes);
     }
 
@@ -168,8 +187,44 @@ impl FragmentedBytes {
 
         return vector;
     }
+
+    pub fn remaining_bytes(self) -> FragmentedBytes {
+        let mut bytes_vec = vec![];
+        let read_pos = self.read_pos();
+        let old_bytes_vec = self.bytes_vec;
+        let mut i = 0;
+
+        for mut bytes in old_bytes_vec {
+            if read_pos >= i && read_pos <= i + bytes.len() {
+                let original_len = bytes.len();
+                let mut vector = mem::take(bytes.buffer_mut());
+                // truncate the buffer [read_pos - i..]
+                let vector = vector.split_off(read_pos - i);
+                let len = vector.len();
+                let bytes = Bytes::new(vector, len);
+                bytes_vec.push(bytes);
+
+                i += original_len;
+            } else if bytes_vec.len() != 0 {
+                bytes_vec.push(bytes);
+            } else {
+                let bytes = mem::take(&mut bytes);
+                i += bytes.len();
+                drop(bytes);
+            }
+        }
+
+        FragmentedBytes::new(bytes_vec)
+    }
 }
 
+impl Default for FragmentedBytes {
+    fn default() -> Self {
+        FragmentedBytes::new(vec![])
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct FragmentedBytesIterator<'a> {
     fragmented_bytes: &'a mut FragmentedBytes,
     current_pos: usize,
@@ -235,6 +290,14 @@ mod bytes_test {
         fragmented_bytes![bytes1, bytes2, bytes3, bytes4]
     }
 
+    fn test_fragmented_byte_content(
+        fragmented_bytes: &mut FragmentedBytes,
+        expected_bytes: &Vec<u8>,
+    ) {
+        let actual_bytes: Vec<u8> = fragmented_bytes.iter().collect();
+        assert_eq!(&actual_bytes, expected_bytes);
+    }
+
     #[test]
     fn test_create_fragmented_bytes() {
         let expected_vector =
@@ -242,14 +305,7 @@ mod bytes_test {
 
         let mut bytes = create_fragmented_bytes();
 
-        let mut iter1 = bytes.iter();
-        let mut v1 = expected_vector.iter();
-
-        assert!(iter1.next().is_some());
-        v1.next();
-        for i in iter1 {
-            assert_eq!(*v1.next().unwrap(), i);
-        }
+        test_fragmented_byte_content(&mut bytes, &expected_vector);
 
         let mut iter1 = bytes.iter();
         let mut v1 = expected_vector.iter();
@@ -263,5 +319,45 @@ mod bytes_test {
         for i in iter1 {
             assert_eq!(*v1.next().unwrap(), i);
         }
+    }
+
+    #[test]
+    fn test_remaining_bytes() {
+        let expected_vector =
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18];
+
+        let mut fragmented_bytes = create_fragmented_bytes();
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
+
+        assert_eq!(fragmented_bytes.copy_buffer(2), vec![1, 2, 3]);
+        fragmented_bytes.set_read_pos(3);
+        let mut fragmented_bytes = fragmented_bytes.remaining_bytes();
+        let expected_vector =
+            vec![4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18];
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
+
+        assert_eq!(fragmented_bytes.copy_buffer(2), vec![4, 5, 6]);
+        fragmented_bytes.set_read_pos(3);
+        let mut fragmented_bytes = fragmented_bytes.remaining_bytes();
+        let expected_vector = vec![7, 8, 11, 12, 13, 14, 15, 16, 17, 18];
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
+
+        assert_eq!(fragmented_bytes.copy_buffer(2), vec![7, 8, 11]);
+        fragmented_bytes.set_read_pos(3);
+        let mut fragmented_bytes = fragmented_bytes.remaining_bytes();
+        let expected_vector = vec![12, 13, 14, 15, 16, 17, 18];
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
+
+        assert_eq!(fragmented_bytes.copy_buffer(0), vec![12]);
+        fragmented_bytes.set_read_pos(1);
+        let mut fragmented_bytes = fragmented_bytes.remaining_bytes();
+        let expected_vector = vec![13, 14, 15, 16, 17, 18];
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
+
+        assert_eq!(fragmented_bytes.copy_buffer(3), vec![13, 14, 15, 16]);
+        fragmented_bytes.set_read_pos(4);
+        let mut fragmented_bytes = fragmented_bytes.remaining_bytes();
+        let expected_vector = vec![17, 18];
+        test_fragmented_byte_content(&mut fragmented_bytes, &expected_vector);
     }
 }

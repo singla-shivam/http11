@@ -197,6 +197,8 @@ impl RequestBuilder {
 
         let headers = headers.unwrap();
         self.headers = Some(headers);
+        let fragmented_bytes = mem::take(&mut self.fragmented_bytes);
+        self.fragmented_bytes = fragmented_bytes.remaining_bytes();
 
         self
     }
