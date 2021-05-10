@@ -24,7 +24,13 @@ macro_rules! errors {
         [
             $(
                 $(#[$docs2:meta])*
-                ($name2:ident, $type:ty, $phrase2:expr);
+                ($name2:ident, $phrase2:expr);
+            )+
+        ],
+        [
+            $(
+                $(#[$docs_n:meta])*
+                ($name_n:ident, $type_n:ty, $phrase_n:expr);
             )+
         ]
     ) => {
@@ -36,7 +42,11 @@ macro_rules! errors {
             )+
             $(
                 $(#[$docs2])*
-                $name2($type),
+                $name2(String),
+            )+
+            $(
+                $(#[$docs_n])*
+                $name_n($type_n),
             )+
         }
 
@@ -47,7 +57,10 @@ macro_rules! errors {
                         Error::$name1 => String::from($phrase1),
                     )+
                     $(
-                        Error::$name2(val) => format!("{}: {:?}", $phrase2, val),
+                        Error::$name2(val) => format!("{}: {}", $phrase2, val),
+                    )+
+                    $(
+                        Error::$name_n(val) => format!("{}: {:?}", $phrase_n, val),
                     )+
                 }
             }
@@ -70,13 +83,17 @@ errors! {
         (InvalidUri, "Invalid token in Uri");
         (InvalidHttpVersion, "Invalid http version");
         (RequestNotParsed, "Trying to get request before it is not parsed completely");
-        (InvalidCrlf, "Invalid character after \\r.");
         (InvalidUtf8String, "Invalid utf-8 encoding");
         (InvalidContentLengthValue, "Content length field contains non digit characters");
         (NoChunkedCoding, "There was transfer-encoding but the last encoding was not chunked");
     ],
     [
-        (InvalidHeaderFormat, String, "Invalid header format");
-        (InvalidHeaderFieldToken, String, "Header field contains invalid token character");
+        (InvalidCrlf, "Invalid character after \\r.");
+        (InvalidHeaderFormat, "Invalid header format");
+        (InvalidHeaderField, "Invalid header field");
+        (InvalidHeaderFieldValue, "Header field-value contains invalid token character");
+    ],
+    [
+        (InvalidTokenChar, Vec<u8>, "Invalid token character");
     ]
 }

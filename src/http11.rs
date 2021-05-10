@@ -5,6 +5,8 @@ use tokio::net::{TcpListener, TcpStream};
 
 pub struct Http11 {}
 
+static FRAME_SIZE: usize = 1024;
+
 impl Http11 {
     pub async fn start() -> Result<()> {
         let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -18,8 +20,6 @@ impl Http11 {
 
     async fn process_socket(stream: TcpStream) -> Result<Request> {
         let mut request_builder = RequestBuilder::new();
-        // let mut buffer: [u8; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
-        let mut buffer: [u8; 1024] = [48; 1024];
 
         loop {
             if !request_builder.can_parse_more() {
@@ -27,6 +27,10 @@ impl Http11 {
             }
 
             stream.readable().await?;
+            let mut buffer = Vec::with_capacity(FRAME_SIZE);
+            unsafe {
+                buffer.set_len(FRAME_SIZE);
+            }
 
             let bytes_read = match stream.try_read(&mut buffer) {
                 Ok(0) => {
@@ -44,7 +48,7 @@ impl Http11 {
                 }
             };
 
-            request_builder.parse(&buffer, bytes_read);
+            request_builder.parse(buffer, bytes_read);
         }
 
         let request = request_builder.build()?;
