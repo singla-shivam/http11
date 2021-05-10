@@ -71,6 +71,7 @@ impl TryFrom<&str> for HttpVersion {
     }
 }
 
+#[derive(Debug)]
 pub struct RequestBuilder {
     method: Option<HttpMethods>,
     uri: Option<RequestUri>,
@@ -197,10 +198,34 @@ impl RequestBuilder {
 
         let headers = headers.unwrap();
         self.headers = Some(headers);
+
+        self
+    }
+
+    fn create_request_body_builder(&mut self) {
+        if !self.are_headers_parsed()
+            || !self.can_have_body()
+            || self.body.is_some()
+        {
+            return;
+        }
+
+        let x = self.are_headers_valid();
+
         let fragmented_bytes = mem::take(&mut self.fragmented_bytes);
         self.fragmented_bytes = fragmented_bytes.remaining_bytes();
 
-        self
+        let is_chunked = self.is_chunked();
+        let body = match is_chunked {
+            true => RequestBodyBuilder::new_chunked(),
+            false => {
+                let headers = self.headers.as_ref().unwrap();
+                let content_length = headers.content_length();
+                let content_length = content_length.unwrap();
+                RequestBodyBuilder::new_whole(content_length.len())
+            }
+        };
+        self.body = Some(body);
     }
 
     fn are_headers_valid(&self) -> Result<bool, HttpError> {
@@ -220,6 +245,13 @@ impl RequestBuilder {
         return Ok(true);
     }
 
+    fn is_chunked(&self) -> bool {
+        let headers = self.headers.as_ref().unwrap();
+        let transfer_encoding = headers.transfer_encoding();
+
+        transfer_encoding.is_some() && transfer_encoding.unwrap().is_chunked()
+    }
+
     fn are_headers_parsed(&self) -> bool {
         self.headers.is_some()
     }
@@ -237,12 +269,15 @@ impl RequestBuilder {
         return content_length.is_some();
     }
 
-    pub(crate) fn parse_body(&mut self, bytes: Bytes) -> &mut RequestBuilder {
+    pub(crate) fn parse_body(&mut self) -> &mut RequestBuilder {
         if !self.are_headers_parsed() || !self.can_have_body() {
             return self;
         }
 
-        self.body.as_mut().unwrap().parse(bytes);
+        self.body
+            .as_mut()
+            .unwrap()
+            .parse(&mut self.fragmented_bytes);
 
         self
     }
@@ -277,7 +312,17 @@ impl RequestBuilder {
             return;
         }
 
-        self.parse_request_line().parse_headers();
+        self.parse_request_line()
+            .parse_headers()
+            .create_request_body_builder();
+
+        if self.are_headers_parsed() {
+            let x = self.are_headers_valid();
+            // TODO handle invalid headers
+
+            self.create_request_body_builder();
+            self.parse_body();
+        }
     }
 
     pub(crate) fn build(self) -> Result<Request, HttpError> {

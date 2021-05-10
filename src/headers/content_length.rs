@@ -22,7 +22,7 @@ impl TryFrom<&str> for ContentLength {
 }
 
 impl ContentLength {
-    pub fn content_length(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.length.parse::<usize>().unwrap()
     }
 }

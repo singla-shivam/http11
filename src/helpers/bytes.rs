@@ -111,6 +111,13 @@ impl Iterator for Bytes {
     }
 }
 
+impl From<Vec<u8>> for Bytes {
+    fn from(value: Vec<u8>) -> Self {
+        let len = value.len();
+        Bytes::new(value, len)
+    }
+}
+
 impl Default for Bytes {
     fn default() -> Self {
         Bytes::new(vec![], 0)
@@ -175,8 +182,29 @@ impl FragmentedBytes {
         self.read_pos = pos;
     }
 
+    pub fn advance_read_pos(&mut self, len: usize) {
+        self.set_read_pos(self.read_pos() + len);
+    }
+
+    pub fn total_len(&self) -> usize {
+        self.total_len
+    }
+
+    pub fn copy_buffer_of_len(&mut self, len: usize) -> Option<Vec<u8>> {
+        if !self.has_n_bytes(len) {
+            return None;
+        }
+
+        let end = self.read_pos() + len - 1;
+        return Some(self.copy_buffer(end));
+    }
+
     /// Copy buffer from `self.read_pos` to `end` both inclusive
     pub fn copy_buffer(&mut self, end: usize) -> Vec<u8> {
+        if end < self.read_pos() {
+            return vec![];
+        }
+
         let len = end - self.read_pos() + 1;
         let mut vector: Vec<u8> = Vec::with_capacity(len);
         let mut iter = self.iter();
@@ -198,10 +226,10 @@ impl FragmentedBytes {
             if read_pos >= i && read_pos <= i + bytes.len() {
                 let original_len = bytes.len();
                 let mut vector = mem::take(bytes.buffer_mut());
-                // truncate the buffer [read_pos - i..]
+                // truncate the buffer to [read_pos - i..]
                 let vector = vector.split_off(read_pos - i);
                 let len = vector.len();
-                let bytes = Bytes::new(vector, len);
+                let bytes = Bytes::new(vector, bytes.len() - read_pos);
                 bytes_vec.push(bytes);
 
                 i += original_len;
@@ -215,6 +243,10 @@ impl FragmentedBytes {
         }
 
         FragmentedBytes::new(bytes_vec)
+    }
+
+    fn has_n_bytes(&self, n: usize) -> bool {
+        self.read_pos() + n <= self.total_len()
     }
 }
 

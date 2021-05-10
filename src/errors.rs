@@ -7,12 +7,6 @@ impl From<Error> for io::Error {
     }
 }
 
-impl From<str::Utf8Error> for Error {
-    fn from(f: str::Utf8Error) -> Self {
-        Error::InvalidUtf8String
-    }
-}
-
 macro_rules! errors {
     (
         [
@@ -83,7 +77,6 @@ errors! {
         (InvalidUri, "Invalid token in Uri");
         (InvalidHttpVersion, "Invalid http version");
         (RequestNotParsed, "Trying to get request before it is not parsed completely");
-        (InvalidUtf8String, "Invalid utf-8 encoding");
         (InvalidContentLengthValue, "Content length field contains non digit characters");
         (NoChunkedCoding, "There was transfer-encoding but the last encoding was not chunked");
     ],
@@ -92,8 +85,10 @@ errors! {
         (InvalidHeaderFormat, "Invalid header format");
         (InvalidHeaderField, "Invalid header field");
         (InvalidHeaderFieldValue, "Header field-value contains invalid token character");
+        (ParseIntError, "Parse Int Error");
     ],
     [
+        (InvalidUtf8String, Vec<u8>, "Invalid utf-8 encoding");
         (InvalidTokenChar, Vec<u8>, "Invalid token character");
     ]
 }

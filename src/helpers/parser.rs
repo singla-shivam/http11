@@ -20,7 +20,13 @@ pub(crate) fn look_for_delimiter(
     }
 
     if delimiter_end != 0 {
-        let buffer = bytes.copy_buffer(delimiter_end - delimiter_len);
+        // delimiter was the start of the buffer
+        let buffer = if delimiter_end < delimiter_len {
+            vec![]
+        } else {
+            bytes.copy_buffer(delimiter_end - delimiter_len)
+        };
+
         bytes.set_read_pos(delimiter_end + 1);
         return Some(buffer);
     }
@@ -170,6 +176,14 @@ mod tests_parser {
         let buffer = look_for_delimiter(&mut bytes, &delimiter);
         assert!(buffer.is_some());
         assert_eq!(vec![21, 22, 23], buffer.unwrap());
+    }
+
+    #[test]
+    fn test_crlf_at_start() {
+        let mut bytes = fragmented_bytes![b"\r\nasdf".to_vec().into()];
+        let buffer = look_for_crlf(&mut bytes);
+        assert!(buffer.is_some());
+        assert_eq!(b"".to_vec(), buffer.unwrap());
     }
 
     #[test]
