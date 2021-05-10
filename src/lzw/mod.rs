@@ -97,10 +97,53 @@ fn compress(string_to_be_compressed : &str) -> String{
 }
 
 
+fn decompress(vector : &Vec<u8>) -> Vec<String>{
+    let mut hash : HashMap<u8 , String> = HashMap::new();
+    for j in 1..27 {
+        hash.insert(j , String::from_utf8(vec![(j+64) as u8]).unwrap());
+    }
+    // let mut trie_dict = Trie::new();
+    let mut ocode = vector[0];
+    let mut out_vec : Vec<String> = Vec::new();
+    let mut start = 27;
+    // let a = vector[0].to_string();
+    out_vec.push(hash.get(&(vector[0])).unwrap().to_string());
+    let mut ncode = "".to_string();
+    let mut string = "".to_string();
+    let mut charac = "".to_string();
+
+    for i in 1..vector.len(){
+        let v = vector[i];
+        let v = vec![v];
+        
+        if !hash.contains_key(&(vector[i])){
+            string = String::from_utf8(vec![ocode]).unwrap();
+            string.push_str(&charac);
+        }
+        else{
+            ncode = hash.get(&vector[i]).unwrap().to_string();
+            string = ncode.clone();
+            // out_vec.push(string.as_bytes()[0].to_string());
+            out_vec.push(hash.get(&(string.as_bytes()[0])).unwrap().to_string());
+        }
+
+        charac = string.chars().nth(0).unwrap().to_string();
+        let mut c = String::from_utf8(vec![ocode]).unwrap();
+        c.push_str(&charac);
+        // trie_dict.add_word(c.as_str(), start);
+        hash.insert(start, c);
+        start += 1;
+        ocode = ncode.as_bytes()[0] as u8;
+    } 
+    return out_vec;
+}
+
 fn main() {
     let string = "TOBEORNOTTOBEORTOBEORNOT";
     let output = compress(&string);
     println!("{}",output);
    
-    // println!("{:?}", trie);
+    let compressed = vec![20,15,2,5,15,18,14,15,20,27,29,31,36,30,32,34];
+    let _uncompressed: Vec<String> = decompress(&compressed);
+    println!("{:?}",_uncompressed);
 }
