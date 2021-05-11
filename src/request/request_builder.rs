@@ -277,7 +277,7 @@ impl RequestBuilder {
         self.body
             .as_mut()
             .unwrap()
-            .parse(&mut self.fragmented_bytes);
+            .parse(&mut self.fragmented_bytes, &self.headers.as_ref().unwrap());
 
         self
     }
@@ -340,7 +340,7 @@ impl RequestBuilder {
             has_skipped_initial_crlf: _,
         } = self;
 
-        let body = LinkedList::new();
+        let body = body.map(|f| f.build());
 
         Ok(Request::new(
             method.unwrap(),

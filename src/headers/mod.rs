@@ -14,10 +14,12 @@ use std::str;
 mod accept;
 mod content_length;
 mod extension_header;
+mod trailer;
 mod transfer_encoding;
 pub use accept::*;
 pub use content_length::*;
 pub use extension_header::*;
+pub use trailer::*;
 pub use transfer_encoding::*;
 
 pub trait Header {
@@ -42,6 +44,7 @@ macro_rules! apply_header_names {
         $macro_name! {
             "transfer-encoding";
             "content-length";
+            "trailer";
         }
     };
 }
@@ -79,6 +82,49 @@ macro_rules! get_header {
     };
 }
 
+macro_rules! valid_headers {
+    ($(
+        $(#[$docs:meta])*
+        $name:expr;
+    )*) => {
+        fn is_valid_header_name(field_name: &str) -> bool {
+            paste! {
+                match field_name {
+                    $(
+                        [<$name:snake:upper _HEADER_NAME>] => true,
+                    )*
+                    _ => false
+                }
+            }
+        }
+    };
+}
+
+macro_rules! get_header_struct {
+    ($(
+        $(#[$docs:meta])*
+        $name:expr;
+    )*) => {
+        paste! {
+            fn get_header_struct(name: &str, value: &str) -> Result<Option<Box<dyn Header>>, HttpError> {
+                if value == "" {
+                    return Ok(None);
+                }
+                let header: Box<dyn Header> = match name {
+                    $(
+                        [<$name:snake:upper _HEADER_NAME>] => {
+                            let header = [<$name:camel>]::try_from(value)?;
+                            Box::new(header)
+                        },
+                    )*
+                    _ => Box::new(ExtensionHeader::new(name, value)),
+                };
+                Ok(Some(header))
+            }
+        }
+    };
+}
+
 apply_header_names!(header_names_constants);
 const ACCEPT_HEADER_NAME: &str = "accept";
 const EXTENSION_HEADER_NAME: &str = "extension-header";
@@ -95,26 +141,9 @@ impl Debug for dyn Header {
 }
 
 impl Headers {
-    fn get_header_struct(name: &str, value: &str) -> Option<Box<dyn Header>> {
-        if value == "" {
-            return None;
-        }
-
-        let header: Box<dyn Header> = match name {
-            ACCEPT_HEADER_NAME => Box::new(ExtensionHeader::new(name, value)),
-            CONTENT_LENGTH_HEADER_NAME => {
-                Box::new(ContentLength::try_from(value).unwrap())
-            }
-            TRANSFER_ENCODING_HEADER_NAME => {
-                Box::new(TransferEncoding::try_from(value).unwrap())
-            }
-            _ => Box::new(ExtensionHeader::new(name, value)),
-        };
-
-        Some(header)
-    }
-
     apply_header_names!(get_header);
+    apply_header_names!(valid_headers);
+    apply_header_names!(get_header_struct);
 }
 
 impl<'a> TryFrom<String> for Headers {
@@ -123,7 +152,7 @@ impl<'a> TryFrom<String> for Headers {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let mut headers = HashMap::new();
 
-        let parts = value.split("\r\n");
+        let parts = value.split("\r\n").filter(|p| p != &"");
 
         for part in parts {
             if is_continued_field(part) {
@@ -162,7 +191,7 @@ impl<'a> TryFrom<String> for Headers {
                 )));
             }
 
-            let header = Headers::get_header_struct(name.as_str(), value);
+            let header = Headers::get_header_struct(name.as_str(), value)?;
             if let Some(header) = header {
                 headers.insert(header.name().to_string(), header);
             }
@@ -190,6 +219,17 @@ mod tests_header {
     use crate::{assert_match, assert_match_error};
     use std::convert::TryFrom;
     use std::str;
+
+    #[test]
+    fn test_no_header() {
+        let buffer = "";
+        let result = Headers::try_from(buffer.to_string());
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert_eq!(result.headers.len(), 0);
+        assert_eq!(result.headers.capacity(), 0);
+    }
 
     #[test]
     fn test_respond_throw_error_invalid_header_with_space_before_colon() {

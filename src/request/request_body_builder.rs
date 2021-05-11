@@ -1,7 +1,9 @@
 use crate::errors::Error;
 use crate::grammar::is_hex_digit;
+use crate::headers::Headers;
 use crate::helpers::bytes::{Bytes, FragmentedBytes};
 use crate::helpers::parser::*;
+use crate::request::RequestBody;
 use std::collections::LinkedList;
 use std::{mem, str};
 
@@ -90,12 +92,20 @@ impl RequestBodyBuilder {
         }
     }
 
-    pub fn parse(&mut self, bytes: &mut FragmentedBytes) {
+    pub fn parse(
+        &mut self,
+        bytes: &mut FragmentedBytes,
+        message_headers: &Headers,
+    ) {
         if self.is_chunked() {
-            self.parse_chunked(bytes);
+            self.parse_chunked(bytes, message_headers);
         } else {
             self.parse_whole(bytes);
         }
+    }
+
+    pub fn build(self) -> RequestBody {
+        RequestBody {}
     }
 
     fn is_chunked(&self) -> bool {
@@ -105,6 +115,7 @@ impl RequestBodyBuilder {
     fn parse_chunked(
         &mut self,
         bytes: &mut FragmentedBytes,
+        message_headers: &Headers,
     ) -> Result<(), Error> {
         loop {
             let body = match &mut self.body {
@@ -126,15 +137,17 @@ impl RequestBodyBuilder {
 
             // last chunk
             if chunk_size == 0 {
-                self.parse_last_chunk(bytes);
+                self.parse_last_chunk(bytes, message_headers);
                 return Ok(());
             }
+
             let buffer = bytes.copy_buffer_of_len(chunk_size);
             if buffer.is_none() {
                 // chunk of size `chunk_size` is not yet received
                 body.set_pending(chunk_size, extensions);
                 return Ok(());
             }
+
             bytes.advance_read_pos(chunk_size + 2);
             let buffer = buffer.unwrap();
 
@@ -142,12 +155,24 @@ impl RequestBodyBuilder {
         }
     }
 
-    fn parse_last_chunk(&mut self, bytes: &mut FragmentedBytes) {
+    fn parse_last_chunk(
+        &mut self,
+        bytes: &mut FragmentedBytes,
+        message_headers: &Headers,
+    ) {
         let body = match &mut self.body {
             PartialRequestBody::Whole(_) => return,
             PartialRequestBody::Chunked(b) => b,
         };
 
+        let trailer = message_headers.trailer();
+        if trailer.is_none() {
+            body.is_completed = true;
+            return;
+        }
+
+        // TODO parse trailer headers
+        // let trailer = trailer.unwrap();
         body.is_completed = true;
     }
 
@@ -196,9 +221,15 @@ impl RequestBodyBuilder {
 #[cfg(test)]
 mod tests_request_body_builder {
     use super::*;
+    use std::convert::TryFrom;
+
+    fn empty_message_headers() -> Headers {
+        Headers::try_from("".to_string()).unwrap()
+    }
 
     #[test]
     fn test_whole_body() {
+        let headers = empty_message_headers();
         const BODY_LENGTH: usize = 20;
         let mut builder = RequestBodyBuilder::new_whole(BODY_LENGTH);
         let bytes1 = Bytes::new(vec![1, 2, 3], 3);
@@ -208,28 +239,28 @@ mod tests_request_body_builder {
         assert!(!builder.is_chunked());
         assert_eq!(builder.body_length, BODY_LENGTH);
 
-        builder.parse(&mut bytes);
+        builder.parse(&mut bytes, &headers);
         assert!(!builder.is_parsed());
         assert!(!builder.is_chunked());
         assert_eq!(builder.body_length, BODY_LENGTH);
 
         let bytes1 = Bytes::new(vec![4, 5, 6, 7, 8, 9, 10], 7);
         bytes.push_bytes(bytes1);
-        builder.parse(&mut bytes);
+        builder.parse(&mut bytes, &headers);
         assert!(!builder.is_parsed());
         assert!(!builder.is_chunked());
         assert_eq!(builder.body_length, BODY_LENGTH);
 
         let bytes1 = Bytes::new(vec![14, 15, 16, 17, 18, 19, 20], 7);
         bytes.push_bytes(bytes1);
-        builder.parse(&mut bytes);
+        builder.parse(&mut bytes, &headers);
         assert!(!builder.is_parsed());
         assert!(!builder.is_chunked());
         assert_eq!(builder.body_length, BODY_LENGTH);
 
         let bytes1 = Bytes::new(vec![21, 22, 23, 24], 4);
         bytes.push_bytes(bytes1);
-        builder.parse(&mut bytes);
+        builder.parse(&mut bytes, &headers);
         assert!(builder.is_parsed());
         assert!(!builder.is_chunked());
         assert_eq!(builder.body_length, BODY_LENGTH);
@@ -302,5 +333,106 @@ mod tests_request_body_builder {
             let chunk_data = chunk_data.unwrap();
             assert!(chunk_data.is_none());
         }
+    }
+    #[cfg(test)]
+    mod chunked_body {
+        use super::*;
+        #[test]
+        fn test_chunked_in_one_pass() {
+            let headers = empty_message_headers();
+            let mut builder = RequestBodyBuilder::new_chunked();
+
+            let buffer =
+                b"A\r\nabcdefghij\r\nA;ext1=1;ext2=2\r\nklmnopqrst\r\n0\r\n";
+
+            let mut bytes = fragmented_bytes![buffer.to_vec().into()];
+
+            builder.parse(&mut bytes, &headers);
+            assert!(builder.is_parsed());
+
+            match builder.body {
+                PartialRequestBody::Chunked(b) => {
+                    assert!(b.is_completed);
+                    assert!(b.last_pending_chunk.is_none());
+
+                    let mut expected_chunks = LinkedList::new();
+                    expected_chunks.push_back(b"abcdefghij".to_vec());
+                    expected_chunks.push_back(b"klmnopqrst".to_vec());
+                    assert_eq!(b.chunks, expected_chunks);
+                }
+
+                PartialRequestBody::Whole(_) => {
+                    panic!("Expected chunked body");
+                }
+            }
+        }
+
+        #[test]
+        fn test_chunked_in_multiple_pass() {
+            let headers = empty_message_headers();
+            let mut builder = RequestBodyBuilder::new_chunked();
+
+            // incomplete CRLF of first line of the chunk
+            let buffer = b"A\r";
+            let mut bytes = fragmented_bytes![buffer.to_vec().into()];
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // total length was 10, 6 is passed
+            let buffer = b"\nabcdef";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // last CRLF is not yet received
+            let buffer = b"ghij";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // complete CRLF of first line of the chunk
+            let buffer = b"\r\n0b\r\n";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // last CRLF also received
+            let buffer = b"12345678910\r\n";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // first line incomplete of the last chunk
+            let buffer = b"0";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(!builder.is_parsed());
+
+            // first line complete of the last chunk
+            let buffer = b"00\r\n";
+            bytes.push_bytes(buffer.to_vec().into());
+            builder.parse(&mut bytes, &headers);
+            assert!(builder.is_parsed());
+
+            match builder.body {
+                PartialRequestBody::Chunked(b) => {
+                    assert!(b.is_completed);
+                    assert!(b.last_pending_chunk.is_none());
+
+                    let mut expected_chunks = LinkedList::new();
+                    expected_chunks.push_back(b"abcdefghij".to_vec());
+                    expected_chunks.push_back(b"12345678910".to_vec());
+                    assert_eq!(b.chunks, expected_chunks);
+                }
+
+                PartialRequestBody::Whole(_) => {
+                    panic!("Expected chunked body");
+                }
+            }
+        }
+
+        // TODO
+        // #[test]
+        // fn test_trailer_part() {}
     }
 }

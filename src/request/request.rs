@@ -1,5 +1,5 @@
 use crate::headers::Headers;
-use crate::request::{HttpMethods, HttpVersion, RequestUri};
+use crate::request::{HttpMethods, HttpVersion, RequestBody, RequestUri};
 use std::collections::LinkedList;
 use std::fmt;
 
@@ -8,7 +8,7 @@ pub struct Request {
     method: HttpMethods,
     uri: RequestUri,
     http_version: HttpVersion,
-    body: LinkedList<Vec<u8>>,
+    body: Option<RequestBody>,
     headers: Headers,
 }
 
@@ -18,7 +18,7 @@ impl Request {
         uri: RequestUri,
         http_version: HttpVersion,
         headers: Headers,
-        body: LinkedList<Vec<u8>>,
+        body: Option<RequestBody>,
     ) -> Request {
         Request {
             method,

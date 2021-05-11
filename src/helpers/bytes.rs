@@ -223,13 +223,14 @@ impl FragmentedBytes {
         let mut i = 0;
 
         for mut bytes in old_bytes_vec {
-            if read_pos >= i && read_pos <= i + bytes.len() {
+            if read_pos >= i && read_pos < i + bytes.len() {
                 let original_len = bytes.len();
                 let mut vector = mem::take(bytes.buffer_mut());
-                // truncate the buffer to [read_pos - i..]
-                let vector = vector.split_off(read_pos - i);
+                let unread_buffer_start = read_pos - i;
+                // truncate the buffer to [already_read..]
+                let vector = vector.split_off(unread_buffer_start);
                 let len = vector.len();
-                let bytes = Bytes::new(vector, bytes.len() - read_pos);
+                let bytes = Bytes::new(vector, bytes.len() - unread_buffer_start);
                 bytes_vec.push(bytes);
 
                 i += original_len;
