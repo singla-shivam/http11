@@ -3,7 +3,7 @@ use std::any::Any;
 
 pub struct AcceptHeader {
     typ: String,
-    sub_type: String, // TODO (@vedant) add other fields
+    sub_type: String,
 }
 
 impl Header for AcceptHeader {

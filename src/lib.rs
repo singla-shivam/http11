@@ -11,6 +11,7 @@ mod grammar;
 pub mod headers;
 #[macro_use]
 mod helpers;
+mod connection;
 mod http11;
 mod request;
 pub mod response;

@@ -9,7 +9,7 @@ use std::{mem, str};
 
 #[derive(Debug)]
 pub(crate) struct ChunkedBody {
-    chunks: LinkedList<Vec<u8>>,
+    chunks: FragmentedBytes,
     /// chunk_size and extensions of last pending chunk
     last_pending_chunk: Option<(usize, Vec<String>)>,
     is_completed: bool,
@@ -18,14 +18,14 @@ pub(crate) struct ChunkedBody {
 impl ChunkedBody {
     pub fn new() -> ChunkedBody {
         ChunkedBody {
-            chunks: LinkedList::new(),
+            chunks: FragmentedBytes::default(),
             last_pending_chunk: None,
             is_completed: false,
         }
     }
 
     pub fn push_back(&mut self, buffer: Vec<u8>) {
-        self.chunks.push_back(buffer);
+        self.chunks.push_bytes(buffer.into());
     }
 
     pub fn set_pending(&mut self, chunk_size: usize, extensions: Vec<String>) {
@@ -96,16 +96,21 @@ impl RequestBodyBuilder {
         &mut self,
         bytes: &mut FragmentedBytes,
         message_headers: &Headers,
-    ) {
+    ) -> Result<&mut Self, Error> {
         if self.is_chunked() {
-            self.parse_chunked(bytes, message_headers);
+            self.parse_chunked(bytes, message_headers)?;
         } else {
-            self.parse_whole(bytes);
+            self.parse_whole(bytes)?;
         }
+
+        Ok(self)
     }
 
     pub fn build(self) -> RequestBody {
-        RequestBody {}
+        match self.body {
+            PartialRequestBody::Chunked(b) => RequestBody::Chunked(b.chunks),
+            PartialRequestBody::Whole(b) => RequestBody::Whole(b),
+        }
     }
 
     fn is_chunked(&self) -> bool {
@@ -210,11 +215,16 @@ impl RequestBodyBuilder {
         Ok(Some((chunk_size, first_line_parts)))
     }
 
-    fn parse_whole(&mut self, bytes: &mut FragmentedBytes) {
+    fn parse_whole(
+        &mut self,
+        bytes: &mut FragmentedBytes,
+    ) -> Result<(), Error> {
         if self.body_length <= bytes.total_len() {
             let bytes = mem::take(bytes);
             self.body = PartialRequestBody::Whole(bytes);
         }
+
+        Ok(())
     }
 }
 
@@ -355,9 +365,9 @@ mod tests_request_body_builder {
                     assert!(b.is_completed);
                     assert!(b.last_pending_chunk.is_none());
 
-                    let mut expected_chunks = LinkedList::new();
-                    expected_chunks.push_back(b"abcdefghij".to_vec());
-                    expected_chunks.push_back(b"klmnopqrst".to_vec());
+                    let mut expected_chunks = FragmentedBytes::default();
+                    expected_chunks.push_bytes(b"abcdefghij".to_vec().into());
+                    expected_chunks.push_bytes(b"klmnopqrst".to_vec().into());
                     assert_eq!(b.chunks, expected_chunks);
                 }
 
@@ -419,9 +429,9 @@ mod tests_request_body_builder {
                     assert!(b.is_completed);
                     assert!(b.last_pending_chunk.is_none());
 
-                    let mut expected_chunks = LinkedList::new();
-                    expected_chunks.push_back(b"abcdefghij".to_vec());
-                    expected_chunks.push_back(b"12345678910".to_vec());
+                    let mut expected_chunks = FragmentedBytes::default();
+                    expected_chunks.push_bytes(b"abcdefghij".to_vec().into());
+                    expected_chunks.push_bytes(b"12345678910".to_vec().into());
                     assert_eq!(b.chunks, expected_chunks);
                 }
 

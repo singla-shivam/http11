@@ -1,2 +1,7 @@
+use crate::helpers::bytes::FragmentedBytes;
+
 #[derive(Debug)]
-pub struct RequestBody {}
+pub enum RequestBody {
+    Whole(FragmentedBytes),
+    Chunked(FragmentedBytes),
+}

@@ -1,11 +1,10 @@
 use crate::{Request, RequestBuilder};
 use std::io::{ErrorKind, Result};
 // use std::mem::MaybeUninit;
+use crate::connection::Connection;
 use tokio::net::{TcpListener, TcpStream};
 
 pub struct Http11 {}
-
-static FRAME_SIZE: usize = 1024;
 
 impl Http11 {
     pub async fn start() -> Result<()> {
@@ -13,45 +12,8 @@ impl Http11 {
 
         loop {
             let (stream, _) = listener.accept().await?;
-            let request = Http11::process_socket(stream).await?;
-            println!("request: {:?}", request);
+            let connection = Connection::from(stream);
+            connection.process_socket();
         }
-    }
-
-    async fn process_socket(stream: TcpStream) -> Result<Request> {
-        let mut request_builder = RequestBuilder::new();
-
-        loop {
-            if !request_builder.can_parse_more() {
-                break;
-            }
-
-            stream.readable().await?;
-            let mut buffer = Vec::with_capacity(FRAME_SIZE);
-            unsafe {
-                buffer.set_len(FRAME_SIZE);
-            }
-
-            let bytes_read = match stream.try_read(&mut buffer) {
-                Ok(0) => {
-                    println!("0 byte");
-                    break;
-                }
-                // Limit the number of bytes read
-                // Ok(n) => (),
-                Ok(n) => n,
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
-
-            request_builder.parse(buffer, bytes_read);
-        }
-
-        let request = request_builder.build()?;
-        Ok(request)
     }
 }

@@ -1,3 +1,4 @@
+use crate::errors::Error;
 use crate::helpers::bytes::FragmentedBytes;
 
 pub(crate) fn look_for_delimiter(
@@ -59,7 +60,9 @@ fn push_to_buffer(buf: &mut Vec<u8>, byte: u8) {
     buf[len - 1] = byte;
 }
 
-pub(crate) fn skip_initial_crlf(bytes: &mut FragmentedBytes) -> bool {
+pub(crate) fn skip_initial_crlf(
+    bytes: &mut FragmentedBytes,
+) -> Result<bool, Error> {
     let mut bytes_iter = bytes.iter();
     loop {
         let byte = bytes_iter.peek();
@@ -69,15 +72,13 @@ pub(crate) fn skip_initial_crlf(bytes: &mut FragmentedBytes) -> bool {
                 bytes_iter.next();
                 let next_byte = bytes_iter.next();
                 if next_byte.is_none() {
-                    return false;
+                    return Ok(false);
                 }
 
                 let next_byte = next_byte.unwrap();
                 match next_byte {
                     b'\n' => continue,
-                    _ => {
-                        // TODO error after \r
-                    }
+                    _ => return Err(Error::InvalidCrlf(next_byte.to_string())),
                 }
             }
             Some(b'\n') => {
@@ -86,9 +87,9 @@ pub(crate) fn skip_initial_crlf(bytes: &mut FragmentedBytes) -> bool {
             Some(_) => {
                 let current_pos = bytes_iter.current_pos();
                 bytes.set_read_pos(current_pos);
-                return true;
+                return Ok(true);
             }
-            None => return false,
+            None => return Ok(false),
         }
     }
 }
@@ -200,7 +201,7 @@ mod tests_parser {
         let mut bytes = fragmented_bytes![bytes];
 
         let result = skip_initial_crlf(&mut bytes);
-        assert!(result);
+        assert!(result.unwrap());
 
         let buffer = bytes.copy_buffer(len - 1);
         assert_eq!(buffer, vec![65]);
@@ -220,7 +221,7 @@ mod tests_parser {
         let mut bytes = fragmented_bytes![bytes];
 
         let result = skip_initial_crlf(&mut bytes);
-        assert!(!result);
+        assert!(!result.unwrap());
 
         let buffer = bytes.copy_buffer(len - 1);
         assert_eq!(buffer, vec![13, 10, 13, 10, 13, 10, 13, 10, 13]);
@@ -239,7 +240,7 @@ mod tests_parser {
         let mut bytes = fragmented_bytes![bytes];
 
         let result = skip_initial_crlf(&mut bytes);
-        assert!(!result);
+        assert!(!result.unwrap());
 
         let buffer = bytes.copy_buffer(len - 1);
         assert_eq!(buffer, vec![13, 10, 13, 10, 13, 10, 13, 10]);

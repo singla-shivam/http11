@@ -66,7 +66,7 @@ impl TryFrom<&str> for HttpVersion {
 
         match &version[..] {
             "http/1.1" => Ok(HttpVersion::Http11),
-            _ => Err(HttpError::InvalidHttpVersion),
+            _ => Err(HttpError::InvalidHttpVersion(version)),
         }
     }
 }
@@ -95,60 +95,47 @@ impl RequestBuilder {
         }
     }
 
-    fn is_parsed(&self) -> bool {
-        self.method.is_some()
-            && self.uri.is_some()
-            && self.http_version.is_some()
-            && self.headers.is_some()
-    }
-
-    fn get_request_line(&mut self) -> Option<String> {
+    fn get_request_line(&mut self) -> Result<Option<String>, HttpError> {
         let result = look_for_crlf(&mut self.fragmented_bytes);
         if result.is_none() {
-            return None;
+            return Ok(None);
         }
 
         let result = result.unwrap();
         let result = String::from_utf8(result);
         if result.is_err() {
-            // TODO throw invalid request line error
-            unimplemented!();
+            return Err(HttpError::InvalidRequestLine(
+                "not a valid ascii/utf-8 string".into(),
+            ));
         }
 
-        Some(result.unwrap())
+        Ok(Some(result.unwrap()))
     }
 
-    fn parse_request_line(&mut self) -> &mut Self {
+    fn parse_request_line(&mut self) -> Result<&mut Self, HttpError> {
         if self.uri.is_some() {
-            return self;
+            return Ok(self);
         }
 
-        let request_line = self.get_request_line();
-        if request_line.is_none() {
-            return self;
-        }
+        let request_line = self.get_request_line()?;
+        let request_line = match request_line {
+            None => return Ok(self),
+            Some(r) => r,
+        };
 
-        let request_line = request_line.unwrap();
         let mut parts: Vec<&str> = request_line.split(" ").collect();
 
-        if parts.len() < 3 {
-            // TODO invalid request line
-            return self;
+        if parts.len() != 3 {
+            return Err(HttpError::InvalidRequestLine(
+                "either request method or request-target or http version is missing".into(),
+            ));
         }
 
-        let method = HttpMethods::try_from(parts[0]);
-        if method.is_err() {
-            // TODO invalid method
-            return self;
-        }
-        self.method = Some(method.unwrap());
+        let method = HttpMethods::try_from(parts[0])?;
+        self.method = Some(method);
 
-        let version = HttpVersion::try_from(*parts.last().unwrap());
-        if version.is_err() {
-            // TODO invalid version
-            return self;
-        }
-        self.http_version = Some(version.unwrap());
+        let version = HttpVersion::try_from(*parts.last().unwrap())?;
+        self.http_version = Some(version);
 
         parts.pop();
 
@@ -156,50 +143,44 @@ impl RequestBuilder {
         let request_uri = RequestUri::try_from(request_uri);
         if request_uri.is_err() {
             // TODO invalid request_uri
-            return self;
+            return Ok(self);
         }
         self.uri = Some(request_uri.unwrap());
 
-        self
+        Ok(self)
     }
 
-    fn get_headers(&mut self) -> Option<String> {
+    fn get_headers(&mut self) -> Result<Option<String>, HttpError> {
         let result = look_for_double_crlf(&mut self.fragmented_bytes);
         if result.is_none() {
-            return None;
+            return Ok(None);
         }
 
-        let result = result.unwrap();
-        let result = String::from_utf8(result);
+        let headers_vector = result.unwrap();
+        let result = String::from_utf8(headers_vector);
         if result.is_err() {
-            // TODO throw invalid request line error
-            unimplemented!();
+            let error = result.err().unwrap();
+            return Err(HttpError::InvalidUtf8String(
+                error.as_bytes().to_vec(),
+            ));
         }
 
-        Some(result.unwrap())
+        Ok(Some(result.unwrap()))
     }
 
-    fn parse_headers(&mut self) -> &mut Self {
+    fn parse_headers(&mut self) -> Result<&mut Self, HttpError> {
         if self.headers.is_some() {
-            return self;
+            return Ok(self);
         }
 
-        let headers = self.get_headers();
-        if headers.is_none() {
-            return self;
-        }
+        let headers = match self.get_headers()? {
+            None => return Ok(self),
+            Some(h) => h,
+        };
 
-        let headers = headers.unwrap();
-        let headers = Headers::try_from(headers);
-        if headers.is_err() {
-            // TODO throw invalid request line error
-            unimplemented!();
-        }
-
-        let headers = headers.unwrap();
+        let headers = Headers::try_from(headers)?;
         self.headers = Some(headers);
-
-        self
+        Ok(self)
     }
 
     fn create_request_body_builder(&mut self) {
@@ -234,7 +215,6 @@ impl RequestBuilder {
         let transfer_encoding = headers.transfer_encoding();
         if let Some(transfer_encoding) = transfer_encoding {
             if !transfer_encoding.is_chunked() {
-                // TODO it is an error, send 400
                 return Err(HttpError::NoChunkedCoding);
             }
 
@@ -299,37 +279,37 @@ impl RequestBuilder {
         return false;
     }
 
-    pub fn parse(&mut self, vec: Vec<u8>, length: usize) {
+    pub fn parse(
+        &mut self,
+        vec: Vec<u8>,
+        length: usize,
+    ) -> Result<&Self, HttpError> {
         let bytes = Bytes::new(vec, length);
         self.fragmented_bytes.push_bytes(bytes);
 
         if !self.has_skipped_initial_crlf {
-            let result = skip_initial_crlf(&mut self.fragmented_bytes);
+            let result = skip_initial_crlf(&mut self.fragmented_bytes)?;
             self.has_skipped_initial_crlf = result;
         }
 
         if !self.has_skipped_initial_crlf {
-            return;
+            return Ok(self);
         }
 
-        self.parse_request_line()
-            .parse_headers()
+        self.parse_request_line()?
+            .parse_headers()?
             .create_request_body_builder();
 
         if self.are_headers_parsed() {
-            let x = self.are_headers_valid();
-            // TODO handle invalid headers
-
+            self.are_headers_valid()?;
             self.create_request_body_builder();
             self.parse_body();
         }
+
+        Ok(self)
     }
 
-    pub(crate) fn build(self) -> Result<Request, HttpError> {
-        if !self.is_parsed() {
-            return Err(HttpError::RequestNotParsed);
-        }
-
+    pub(crate) fn build(self) -> Request {
         let RequestBuilder {
             method,
             uri,
@@ -342,13 +322,13 @@ impl RequestBuilder {
 
         let body = body.map(|f| f.build());
 
-        Ok(Request::new(
+        Request::new(
             method.unwrap(),
             uri.unwrap(),
             http_version.unwrap(),
             headers.unwrap(),
             body,
-        ))
+        )
     }
 }
 

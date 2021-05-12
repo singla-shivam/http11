@@ -75,12 +75,13 @@ errors! {
         (NewLine, "Invalid byte in new line");
         (Token, "Invalid token character");
         (InvalidUri, "Invalid token in Uri");
-        (InvalidHttpVersion, "Invalid http version");
         (RequestNotParsed, "Trying to get request before it is not parsed completely");
         (InvalidContentLengthValue, "Content length field contains non digit characters");
         (NoChunkedCoding, "There was transfer-encoding but the last encoding was not chunked");
     ],
     [
+        (InvalidHttpVersion, "Invalid http version");
+        (InvalidRequestLine, "Invalid request line");
         (InvalidCrlf, "Invalid character after \\r.");
         (InvalidHeaderFormat, "Invalid header format");
         (InvalidHeaderField, "Invalid header field");

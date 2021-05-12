@@ -2,8 +2,8 @@ use std::boxed::Box;
 use std::ops::{Index, IndexMut};
 use std::{mem, ptr};
 
-#[derive(Debug)]
-pub(crate) struct Bytes {
+#[derive(Debug, PartialEq)]
+pub struct Bytes {
     buf: Vec<u8>,
     pos: usize,
     len: usize,
@@ -143,8 +143,8 @@ macro_rules! fragmented_bytes {
     );
 }
 
-#[derive(Debug)]
-pub(crate) struct FragmentedBytes {
+#[derive(Debug, PartialEq)]
+pub struct FragmentedBytes {
     bytes_vec: Vec<Bytes>,
     read_pos: usize,
     total_len: usize,
@@ -230,7 +230,8 @@ impl FragmentedBytes {
                 // truncate the buffer to [already_read..]
                 let vector = vector.split_off(unread_buffer_start);
                 let len = vector.len();
-                let bytes = Bytes::new(vector, bytes.len() - unread_buffer_start);
+                let bytes =
+                    Bytes::new(vector, bytes.len() - unread_buffer_start);
                 bytes_vec.push(bytes);
 
                 i += original_len;
@@ -258,7 +259,7 @@ impl Default for FragmentedBytes {
 }
 
 #[derive(Debug)]
-pub(crate) struct FragmentedBytesIterator<'a> {
+pub struct FragmentedBytesIterator<'a> {
     fragmented_bytes: &'a mut FragmentedBytes,
     current_pos: usize,
 }
