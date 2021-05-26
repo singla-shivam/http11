@@ -38,5 +38,18 @@
     },
     "args": [],
     "cwd": "${workspaceFolder}"
+  }, {
+    "type": "lldb",
+    "request": "launch",
+    "name": "Run example 01",
+    "cargo": {
+      "args": [
+        "run",
+        "--example",
+        "01"
+      ]
+    },
+    "args": [],
+    "cwd": "${workspaceFolder}"
   }]
 }

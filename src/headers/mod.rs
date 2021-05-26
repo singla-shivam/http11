@@ -134,6 +134,9 @@ pub struct Headers {
     headers: HashMap<String, Box<dyn Header>>,
 }
 
+unsafe impl Send for Headers {}
+unsafe impl Sync for Headers {}
+
 impl Debug for dyn Header {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.header_string())

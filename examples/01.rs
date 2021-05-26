@@ -1,9 +1,7 @@
-use http11::status::StatusCode;
-use http11::Http11;
-use regex::Regex;
+use http11::{App, Http11Server};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let x = Http11::start();
-    x.await;
+    let x = Http11Server::start(App::new());
+    let _z = x.await;
 }

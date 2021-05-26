@@ -11,11 +11,13 @@ mod grammar;
 pub mod headers;
 #[macro_use]
 mod helpers;
+pub mod app;
 mod connection;
-mod http11;
+mod http11_server;
 mod request;
 pub mod response;
 pub mod status;
 
-pub use crate::http11::*;
+pub use crate::http11_server::*;
+pub use app::App;
 pub use request::{Request, RequestBuilder};
